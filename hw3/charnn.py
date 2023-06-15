@@ -128,29 +128,16 @@ def chars_to_labelled_samples(text: str, char_to_idx: dict, seq_len: int, device
     # ====== YOUR CODE: ======
     
     embedded_text = chars_to_onehot(text, char_to_idx).to(device)  # N_total, V
-    # print(f"{embedded_text.shape=}")
+    idx_text = torch.tensor(list(map(char_to_idx.get, text))) # N_total
+    
     num_of_samples = (embedded_text.shape[0] - 1) // seq_len # N
     
     text_slice_to_samples = embedded_text[:num_of_samples*seq_len, :] # N*seq_len, V
-    # print(f"{text_slice_to_samples.shape=}")
-    text_slice_to_labels = embedded_text[1:num_of_samples*seq_len + 1, :] # N*seq_len, V
-    # print(f"{text_slice_to_labels.shape=}")
+    text_slice_to_labels = idx_text[1:num_of_samples*seq_len + 1] # N*seq_len
     
     samples = text_slice_to_samples.reshape(-1, seq_len, embedded_text.shape[1]) # N, seq_len, V
-    labels = text_slice_to_labels.reshape(-1, seq_len, embedded_text.shape[1]) # N, seq_len, V
-    
-    # test size = 11
-    
-    # V = 4
-    
-    # S = seq_len = 3
-    
-    # N = num_of_samples = 3
-    
-    # text_slice_to_samples = 0 : 3 * 3 -> 0: 9
-    
-    # text_slice_to_labels = 1 : 3 * 3 + 1 -> 1 : 10
-    
+    labels = text_slice_to_labels.reshape(-1, seq_len) # N, seq_len
+
     # ========================
     return samples, labels
 
@@ -235,7 +222,11 @@ class SequenceBatchSampler(torch.utils.data.Sampler):
         #  you can drop it.
         idx = None  # idx should be a 1-d list of indices.
         # ====== YOUR CODE: ======
-        raise NotImplementedError()
+        
+        num_of_batches = len(self.dataset) // self.batch_size
+        
+        idx = [(i + j * num_of_batches) for i in range(num_of_batches) for j in range(self.batch_size)]
+        
         # ========================
         return iter(idx)
 
