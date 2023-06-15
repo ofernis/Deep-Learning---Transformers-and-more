@@ -23,7 +23,11 @@ def char_maps(text: str):
     #  It's best if you also sort the chars before assigning indices, so that
     #  they're in lexical order.
     # ====== YOUR CODE: ======
-    raise NotImplementedError()
+    
+    chars_bag = sorted(list(set(text)))
+    char_to_idx = {c: i for i, c in enumerate(chars_bag)}
+    idx_to_char = {i: c for c, i in char_to_idx.items()}
+    
     # ========================
     return char_to_idx, idx_to_char
 
@@ -39,7 +43,14 @@ def remove_chars(text: str, chars_to_remove):
     """
     # TODO: Implement according to the docstring.
     # ====== YOUR CODE: ======
-    raise NotImplementedError()
+    
+    text_clean = text
+    n_removed = 0
+    
+    for c in chars_to_remove:
+        text_clean = text.replace(c, '')
+        n_removed += text.count(c)
+    
     # ========================
     return text_clean, n_removed
 
@@ -59,7 +70,12 @@ def chars_to_onehot(text: str, char_to_idx: dict) -> Tensor:
     """
     # TODO: Implement the embedding.
     # ====== YOUR CODE: ======
-    raise NotImplementedError()
+    
+    result = torch.zeros(len(text), len(char_to_idx), dtype=torch.int8)
+
+    for i, c in enumerate(text):
+        result[i][char_to_idx[c]] = 1
+    
     # ========================
     return result
 
@@ -76,7 +92,12 @@ def onehot_to_chars(embedded_text: Tensor, idx_to_char: dict) -> str:
     """
     # TODO: Implement the reverse-embedding.
     # ====== YOUR CODE: ======
-    raise NotImplementedError()
+    
+    result = ""
+    
+    for emb in embedded_text:
+        result += idx_to_char[torch.argmax(emb).item()]
+    
     # ========================
     return result
 
@@ -105,7 +126,31 @@ def chars_to_labelled_samples(text: str, char_to_idx: dict, seq_len: int, device
     #  3. Create the labels tensor in a similar way and convert to indices.
     #  Note that no explicit loops are required to implement this function.
     # ====== YOUR CODE: ======
-    raise NotImplementedError()
+    
+    embedded_text = chars_to_onehot(text, char_to_idx).to(device)  # N_total, V
+    # print(f"{embedded_text.shape=}")
+    num_of_samples = (embedded_text.shape[0] - 1) // seq_len # N
+    
+    text_slice_to_samples = embedded_text[:num_of_samples*seq_len, :] # N*seq_len, V
+    # print(f"{text_slice_to_samples.shape=}")
+    text_slice_to_labels = embedded_text[1:num_of_samples*seq_len + 1, :] # N*seq_len, V
+    # print(f"{text_slice_to_labels.shape=}")
+    
+    samples = text_slice_to_samples.reshape(-1, seq_len, embedded_text.shape[1]) # N, seq_len, V
+    labels = text_slice_to_labels.reshape(-1, seq_len, embedded_text.shape[1]) # N, seq_len, V
+    
+    # test size = 11
+    
+    # V = 4
+    
+    # S = seq_len = 3
+    
+    # N = num_of_samples = 3
+    
+    # text_slice_to_samples = 0 : 3 * 3 -> 0: 9
+    
+    # text_slice_to_labels = 1 : 3 * 3 + 1 -> 1 : 10
+    
     # ========================
     return samples, labels
 
