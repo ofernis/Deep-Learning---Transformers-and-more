@@ -94,8 +94,28 @@ class Trainer(abc.ABC):
             #    simple regularization technique that is highly recommended.
             # ====== YOUR CODE: ======
             
-            raise NotImplementedError()
-
+            actual_num_epochs += 1
+            
+            train_result = self.train_epoch(dl_train, **kw)
+            train_loss.append(sum(train_result.losses) / len(train_result.losses))
+            train_acc.append(train_result.accuracy)
+            
+            test_result = self.test_epoch(dl_test, **kw)
+            test_loss.append(sum(test_result.losses) / len(test_result.losses))
+            test_acc.append(test_result.accuracy)
+            
+            if best_acc is None or test_result.accuracy > best_acc:
+                best_acc = test_result.accuracy
+                if checkpoints is not None:
+                    self.save_checkpoint(checkpoints)
+                
+                epochs_without_improvement = 0
+            else:
+                epochs_without_improvement += 1
+                
+                if early_stopping is not None and epochs_without_improvement >= early_stopping:
+                    break
+            
             # ========================
 
             # Save model checkpoint if requested
@@ -250,7 +270,44 @@ class RNNTrainer(Trainer):
         #  - Update params
         #  - Calculate number of correct char predictions
         # ====== YOUR CODE: ======
-        raise NotImplementedError()
+        
+        # # forward
+        
+        # out, h = self.model.forward(x)
+        
+        # out = out.argmax(dim=-1)
+        
+        # loss = self.loss_fn(out.float(), y.float())
+        
+        # y_pred = torch.argmax(out, dim = -1)
+        
+        # num_correct = torch.sum(y_pred == y)
+        
+        # # backward
+        
+        # h.detach()
+        
+        # self.optimizer.zero_grad()
+        
+        # loss.backward()
+        
+        # self.optimizer.step()
+    
+        # Forward pass
+        output, h = self.model(x)
+        self.h = h.detach()
+
+        # Backward pass
+        self.optimizer.zero_grad()
+        loss = self.loss_fn(input= output.transpose(dim0 = 1, dim1= 2), target= y)
+        loss.backward()
+
+        # Weight updates
+        self.optimizer.step()
+
+        # Calculation of number of correct predictions
+        num_correct = torch.sum(torch.argmax(input= output, dim= -1) == y)
+    
         # ========================
 
         # Note: scaling num_correct by seq_len because each sample has seq_len
@@ -270,7 +327,26 @@ class RNNTrainer(Trainer):
             #  - Loss calculation
             #  - Calculate number of correct predictions
             # ====== YOUR CODE: ======
-            raise NotImplementedError()
+            
+            # out, _ = self.model.forward(x)
+            
+            # out = out.argmax(dim=-1)
+            
+            # y_pred = torch.argmax(out, dim = -1)
+
+            # loss = self.loss_fn(out.float(), y.float())
+            
+            # num_correct = torch.sum(y_pred == y)
+            
+             # Forward pass
+            output, _ = self.model(x)
+            
+            # Loss calculation
+            loss = self.loss_fn(input= output.transpose(dim0 = 1, dim1= 2), target= y)
+
+            # Calculation of number of correct predictions
+            num_correct = torch.sum(torch.argmax(input= output, dim= -1) == y)
+        
             # ========================
 
         return BatchResult(loss.item(), num_correct.item() / seq_len)

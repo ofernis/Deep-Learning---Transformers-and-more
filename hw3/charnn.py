@@ -1,4 +1,5 @@
 import re
+import random
 import torch
 import torch.nn as nn
 import torch.utils.data
@@ -70,8 +71,9 @@ def chars_to_onehot(text: str, char_to_idx: dict) -> Tensor:
     """
     # TODO: Implement the embedding.
     # ====== YOUR CODE: ======
-    
-    result = torch.zeros(len(text), len(char_to_idx), dtype=torch.int8)
+    N = len(text)
+    D = len(char_to_idx)
+    result = torch.zeros(size=(N, D), dtype=torch.int8)
 
     for i, c in enumerate(text):
         result[i][char_to_idx[c]] = 1
@@ -128,16 +130,21 @@ def chars_to_labelled_samples(text: str, char_to_idx: dict, seq_len: int, device
     # ====== YOUR CODE: ======
     
     embedded_text = chars_to_onehot(text, char_to_idx).to(device)  # N_total, V
-    idx_text = torch.tensor(list(map(char_to_idx.get, text))) # N_total
-    
+
     num_of_samples = (embedded_text.shape[0] - 1) // seq_len # N
     
-    text_slice_to_samples = embedded_text[:num_of_samples*seq_len, :] # N*seq_len, V
-    text_slice_to_labels = idx_text[1:num_of_samples*seq_len + 1] # N*seq_len
+    chars_to_keep = num_of_samples*seq_len
     
-    samples = text_slice_to_samples.reshape(-1, seq_len, embedded_text.shape[1]) # N, seq_len, V
-    labels = text_slice_to_labels.reshape(-1, seq_len) # N, seq_len
+    samples_chars = embedded_text[:chars_to_keep, :] # chars_to_keep, V
 
+    labels_chars = embedded_text[1:chars_to_keep+1, :] # chars_to_keep, V
+ 
+    V = embedded_text.shape[1]
+    
+    samples = samples_chars.reshape(-1, seq_len, V) # N, seq_len, V
+    
+    labels = labels_chars.reshape(-1, seq_len, V).argmax(dim=-1) # N, seq_len
+    
     # ========================
     return samples, labels
 
@@ -153,7 +160,9 @@ def hot_softmax(y, dim=0, temperature=1.0):
     """
     # TODO: Implement based on the above.
     # ====== YOUR CODE: ======
-    raise NotImplementedError()
+    
+    result = torch.softmax(y / temperature, dim=dim)
+    
     # ========================
     return result
 
@@ -189,7 +198,28 @@ def generate_from_model(model, start_sequence, n_chars, char_maps, T):
     #  necessary for this. Best to disable tracking for speed.
     #  See torch.no_grad().
     # ====== YOUR CODE: ======
-    raise NotImplementedError()
+    
+    with torch.no_grad():
+        
+        hidden_state = None
+        
+        seq = start_sequence
+        
+        n_chars -= len(start_sequence)
+               
+        for _ in range(n_chars):
+            embedded_seq = chars_to_onehot(seq, char_to_idx).float().unsqueeze(0).to(device)
+            
+            layer_output, hidden_state = model(embedded_seq, hidden_state)
+            
+            logits = hot_softmax(layer_output[0, -1], dim=-1, temperature=T)
+            
+            y_pred = idx_to_char[torch.multinomial(input=logits, num_samples=1).item()]
+            
+            out_text += y_pred
+            
+            seq = seq[1:] + y_pred
+    
     # ========================
 
     return out_text
@@ -223,10 +253,18 @@ class SequenceBatchSampler(torch.utils.data.Sampler):
         idx = None  # idx should be a 1-d list of indices.
         # ====== YOUR CODE: ======
         
-        num_of_batches = len(self.dataset) // self.batch_size
-        
-        idx = [(i + j * num_of_batches) for i in range(num_of_batches) for j in range(self.batch_size)]
-        
+        num_samples = len(self.dataset)
+
+        num_batches = num_samples // self.batch_size
+
+        num_indices = num_batches * self.batch_size
+
+        indices = torch.tensor(list(range(num_indices))) \
+                       .reshape(self.batch_size, num_batches) \
+                       .transpose(0, 1)
+
+        idx = [i for indices_slice in indices for i in indices_slice.tolist()]
+
         # ========================
         return iter(idx)
 
@@ -252,8 +290,8 @@ class MultilayerGRU(nn.Module):
         assert in_dim > 0 and h_dim > 0 and out_dim > 0 and n_layers > 0
 
         self.in_dim = in_dim
-        self.out_dim = out_dim
         self.h_dim = h_dim
+        self.out_dim = out_dim
         self.n_layers = n_layers
         self.layer_params = []
 
@@ -273,9 +311,27 @@ class MultilayerGRU(nn.Module):
         #      then call self.register_parameter() on them. Also make
         #      sure to initialize them. See functions in torch.nn.init.
         # ====== YOUR CODE: ======
-        raise NotImplementedError()
+        
+        self.dropout = nn.Dropout(dropout)
+        
+        for layer in range(n_layers):     
+            input_dim = in_dim if layer == 0 else h_dim
+            
+            self.add_module(name=f"Wxz_{layer}", module=nn.Linear(input_dim, self.h_dim, bias=False))
+            self.add_module(name=f"Wxr_{layer}", module=nn.Linear(input_dim, self.h_dim, bias=False))
+            self.add_module(name=f"Wxg_{layer}", module=nn.Linear(input_dim, self.h_dim, bias=False))
+
+            self.add_module(name=f"Whz_{layer}", module=nn.Linear(self.h_dim, self.h_dim, bias=True))
+            self.add_module(name=f"Whr_{layer}", module=nn.Linear(self.h_dim, self.h_dim, bias=True))
+            self.add_module(name=f"Whg_{layer}", module=nn.Linear(self.h_dim, self.h_dim, bias=True))
+        
+        self.add_module(name='Why', module=nn.Linear(self.h_dim, self.out_dim, bias=True))
+        
+        self.layer_params = self.parameters
+
         # ========================
 
+    
     def forward(self, input: Tensor, hidden_state: Tensor = None):
         """
         :param input: Batch of sequences. Shape should be (B, S, I) where B is
@@ -311,6 +367,31 @@ class MultilayerGRU(nn.Module):
         #  Tip: You can use torch.stack() to combine multiple tensors into a
         #  single tensor in a differentiable manner.
         # ====== YOUR CODE: ======
-        raise NotImplementedError()
+        
+        layer_output = torch.zeros(size=(batch_size, seq_len, self.out_dim),device=input.device)
+        
+        for t in range(seq_len):
+            
+            for layer in range(self.n_layers):
+                x_t = layer_input[:, t] if layer == 0 else self.dropout(layer_states[layer-1])
+                
+                Wxz = self.get_submodule(f"Wxz_{layer}")
+                Wxr = self.get_submodule(f"Wxr_{layer}")
+                Wxg = self.get_submodule(f"Wxg_{layer}")
+                Whz = self.get_submodule(f"Whz_{layer}")
+                Whr = self.get_submodule(f"Whr_{layer}")
+                Whg = self.get_submodule(f"Whg_{layer}")
+                
+                z_t = torch.sigmoid(Wxz(x_t) + Whz(layer_states[layer]))
+                r_t = torch.sigmoid(Wxr(x_t) + Whr(layer_states[layer]))
+                g_t = torch.tanh(Wxg(x_t) + Whg(r_t * layer_states[layer]))
+                layer_states[layer] = z_t * layer_states[layer] + (1 - z_t) * g_t
+                
+            Why = self.get_submodule(f"Why")
+            
+            layer_output[:, t, :] = Why(layer_states[-1])
+            
+        hidden_state = torch.stack(layer_states, dim=1)
+        
         # ========================
         return layer_output, hidden_state
