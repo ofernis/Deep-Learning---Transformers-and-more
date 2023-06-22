@@ -66,13 +66,13 @@ class Trainer(abc.ABC):
         best_acc = None
         epochs_without_improvement = 0
 
-        checkpoints = None
+        checkpoint_filename = None
         if checkpoints is not None:
-            checkpoints = f"{checkpoints}.pt"
-            Path(os.path.dirname(checkpoints)).mkdir(exist_ok=True)
-            if os.path.isfile(checkpoints):
-                print(f"*** Loading checkpoint file {checkpoints}")
-                saved_state = torch.load(checkpoints, map_location=self.device)
+            checkpoint_filename = f"{checkpoints}.pt"
+            Path(os.path.dirname(checkpoint_filename)).mkdir(exist_ok=True)
+            if os.path.isfile(checkpoint_filename):
+                print(f"*** Loading checkpoint file {checkpoint_filename}")
+                saved_state = torch.load(checkpoint_filename, map_location=self.device)
                 best_acc = saved_state.get("best_acc", best_acc)
                 epochs_without_improvement = saved_state.get(
                     "ewi", epochs_without_improvement
@@ -94,34 +94,39 @@ class Trainer(abc.ABC):
             #    simple regularization technique that is highly recommended.
             # ====== YOUR CODE: ======
             
-            # Train
             train_result = self.train_epoch(dl_train, **kw)
             train_loss += train_result.losses
-            train_acc.append(train_result.accuracy)
+            train_acc += train_result.accuracy
             
-            # Test
             test_result = self.test_epoch(dl_test, **kw)
             test_loss += test_result.losses
-            test_acc.append(test_result.accuracy)
+            test_acc += test_result.accuracy
             
             if best_acc is None or test_result.accuracy > best_acc:
                 epochs_without_improvement = 0
                 best_acc = test_result.accuracy
 
-                if checkpoints is not None:
-                    dirname = os.path.dirname(checkpoints) or "."
-                    os.makedirs(dirname, exist_ok=True)
-                    torch.save({"model_state": self.model.state_dict()}, checkpoints)
-                    print(f"\n*** Saved checkpoint {checkpoints}")
             else:
                 epochs_without_improvement += 1
                 if early_stopping is not None and early_stopping == epochs_without_improvement:
                     break
 
+            # ========================
+
+            # Save model checkpoint if requested
+            if save_checkpoint and checkpoint_filename is not None:
+                saved_state = dict(
+                    best_acc=best_acc,
+                    ewi=epochs_without_improvement,
+                    model_state=self.model.state_dict(),
+                )
+                torch.save(saved_state, checkpoint_filename)
+                print(
+                    f"*** Saved checkpoint {checkpoint_filename} " f"at epoch {epoch+1}"
+                )
+
             if post_epoch_fn:
                 post_epoch_fn(epoch, train_result, test_result, verbose)
-            
-            # ========================
 
         return FitResult(actual_num_epochs, train_loss, train_acc, test_loss, test_acc)
 
@@ -234,8 +239,8 @@ class RNNTrainer(Trainer):
         # TODO: Implement modifications to the base method, if needed.
         # ====== YOUR CODE: ======
         
-        self.hs = None
-        
+        self.hidden_state = None    
+            
         # ========================
         return super().train_epoch(dl_train, **kw)
 
@@ -243,7 +248,7 @@ class RNNTrainer(Trainer):
         # TODO: Implement modifications to the base method, if needed.
         # ====== YOUR CODE: ======
         
-        self.hs = None   
+        self.hidden_state = None   
         
         # ========================
         return super().test_epoch(dl_test, **kw)
@@ -263,24 +268,26 @@ class RNNTrainer(Trainer):
         #  - Calculate number of correct char predictions
         # ====== YOUR CODE: ======
         
-        predictions, self.hs = self.model(x, self.hs)
+        #  - Forward pass
+        outputs, self.hidden_state = self.model(x, self.hidden_state)
         
-        ppt_matrix = predictions.transpose(dim0=1, dim1=2)
-        
+        #  - Calculate total loss over sequence
         self.optimizer.zero_grad()
         
-        loss = self.loss_fn(ppt_matrix, y)
+        loss = self.loss_fn(outputs.transpose(dim0=1, dim1=2), y)
         
+        #  - Backward pass: truncated back-propagation through time
         loss.backward(retain_graph=True)
-
+        
+        #  - Update params
         self.optimizer.step()
+        self.hidden_state = self.hidden_state.detach()
         
-        self.hs = self.hs.detach()
+        #  - Calculate number of correct char predictions
+        outputs = torch.argmax(outputs, dim=-1)
+        
+        num_correct = torch.sum(outputs == y).float()
 
-        predictions = torch.argmax(predictions, dim=-1)
-        
-        num_correct = torch.sum(predictions == y).float()
-    
         # ========================
 
         # Note: scaling num_correct by seq_len because each sample has seq_len
@@ -301,16 +308,17 @@ class RNNTrainer(Trainer):
             #  - Calculate number of correct predictions
             # ====== YOUR CODE: ======
             
-            predictions, self.hs = self.model(x, self.hs)
+            #  - Forward pass
+            outputs, self.hidden_state = self.model(x, self.hidden_state)
+            
+            #  - Loss calculation
+            loss = self.loss_fn(outputs.transpose(dim0=1, dim1=2), y)
 
-            ppt_matrix = predictions.transpose(1, 2)
+            #  - Calculate number of correct predictions
+            outputs = torch.argmax(outputs, dim=-1)
+
+            num_correct = torch.sum(outputs == y).float()
             
-            loss = self.loss_fn(ppt_matrix, y)
-            
-            predictions = torch.argmax(predictions, dim=-1)
-            
-            num_correct = torch.sum(predictions == y).float()
-        
             # ========================
 
         return BatchResult(loss.item(), num_correct.item() / seq_len)
@@ -378,6 +386,7 @@ class TransformerEncoderTrainer(Trainer):
             
         
         return BatchResult(loss.item(), num_correct.item())
+
 
 
 class FineTuningTrainer(Trainer):
