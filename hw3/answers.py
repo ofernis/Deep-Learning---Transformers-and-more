@@ -27,9 +27,9 @@ def part1_rnn_hyperparams():
     hypers['h_dim'] = 1024
     hypers['n_layers'] = 2
     hypers['dropout'] = 0.4
-    hypers['learn_rate'] = 1e-2
-    hypers['lr_sched_factor'] = 0.1 
-    hypers['lr_sched_patience'] = 5
+    hypers['learn_rate'] = 0.
+    hypers['lr_sched_factor'] = 0.8 
+    hypers['lr_sched_patience'] = 6
     # ========================
     return hypers
 
@@ -40,7 +40,7 @@ def part1_generation_params():
     # TODO: Tweak the parameters to generate a literary masterpiece.
     # ====== YOUR CODE: ======
     start_seq = "ACT I."
-    temperature = 0.1
+    temperature = 0.15
     # ========================
     return start_seq, temperature
 
