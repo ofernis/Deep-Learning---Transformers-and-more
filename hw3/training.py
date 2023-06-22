@@ -64,10 +64,23 @@ class Trainer(abc.ABC):
         """
 
         actual_num_epochs = 0
+        train_loss, train_acc, test_loss, test_acc = [], [], [], []
+
+        best_acc = None
         epochs_without_improvement = 0
 
-        train_loss, train_acc, test_loss, test_acc = [], [], [], []
-        best_acc = None
+        checkpoints = None
+        if checkpoints is not None:
+            checkpoints = f"{checkpoints}.pt"
+            Path(os.path.dirname(checkpoints)).mkdir(exist_ok=True)
+            if os.path.isfile(checkpoints):
+                print(f"*** Loading checkpoint file {checkpoints}")
+                saved_state = torch.load(checkpoints, map_location=self.device)
+                best_acc = saved_state.get("best_acc", best_acc)
+                epochs_without_improvement = saved_state.get(
+                    "ewi", epochs_without_improvement
+                )
+                self.model.load_state_dict(saved_state["model_state"])
 
         for epoch in range(num_epochs):
             verbose = False  # pass this to train/test_epoch.
@@ -82,31 +95,20 @@ class Trainer(abc.ABC):
             #  - Use the train/test_epoch methods.
             #  - Save losses and accuracies in the lists above.
             # ====== YOUR CODE: ======
-            # Train
+            
             train_result = self.train_epoch(dl_train, **kw)
             train_loss += train_result.losses
-            train_acc.append(train_result.accuracy)
-            # Test
-            test_result = self.test_epoch(dl_test, **kw) # **kw contains the model parameters
+            train_acc += train_result.accuracy
+            
+            test_result = self.test_epoch(dl_test, **kw)
             test_loss += test_result.losses
-            test_acc.append(test_result.accuracy)
-
-            # ========================
-
-            # TODO:
-            #  - Optional: Implement early stopping. This is a very useful and
-            #    simple regularization technique that is highly recommended.
-            #  - Optional: Implement checkpoints. You can use the save_checkpoint
-            #    method on this class to save the model to the file specified by
-            #    the checkpoints argument.
+            test_acc += test_result.accuracy
+            
             if best_acc is None or test_result.accuracy > best_acc:
                 # ====== YOUR CODE: ======
                 epochs_without_improvement = 0
                 best_acc = test_result.accuracy
 
-                if checkpoints is not None:
-                    self.save_checkpoint(checkpoints)
-                # ========================
             else:
                 # ====== YOUR CODE: ======
 
@@ -114,7 +116,19 @@ class Trainer(abc.ABC):
                 if early_stopping is not None and early_stopping == epochs_without_improvement:
                     break
 
-                # ========================
+            # ========================
+
+            # Save model checkpoint if requested
+            if save_checkpoint and checkpoint_filename is not None:
+                saved_state = dict(
+                    best_acc=best_acc,
+                    ewi=epochs_without_improvement,
+                    model_state=self.model.state_dict(),
+                )
+                torch.save(saved_state, checkpoint_filename)
+                print(
+                    f"*** Saved checkpoint {checkpoint_filename} " f"at epoch {epoch+1}"
+                )
 
             if post_epoch_fn:
                 post_epoch_fn(epoch, train_result, test_result, verbose)
@@ -251,14 +265,18 @@ class RNNTrainer(Trainer):
     def train_epoch(self, dl_train: DataLoader, **kw):
         # TODO: Implement modifications to the base method, if needed.
         # ====== YOUR CODE: ======
-        self.hs = None
+        
+        self.hidden_state = None    
+            
         # ========================
         return super().train_epoch(dl_train, **kw)
 
     def test_epoch(self, dl_test: DataLoader, **kw):
         # TODO: Implement modifications to the base method, if needed.
         # ====== YOUR CODE: ======
-        self.hs = None
+        
+        self.hidden_state = None   
+        
         # ========================
         return super().test_epoch(dl_test, **kw)
 
@@ -276,17 +294,27 @@ class RNNTrainer(Trainer):
         #  - Update params
         #  - Calculate number of correct char predictions
         # ====== YOUR CODE: ======
-        predictions, self.hs = self.model(x, self.hs)
-        ppt_matrix = predictions.transpose(1, 2)
+        
+        #  - Forward pass
+        outputs, self.hidden_state = self.model(x, self.hidden_state)
+        
+        #  - Calculate total loss over sequence
         self.optimizer.zero_grad()
-        loss = self.loss_fn(ppt_matrix, y)
+        
+        loss = self.loss_fn(outputs.transpose(dim0=1, dim1=2), y)
+        
+        #  - Backward pass: truncated back-propagation through time
         loss.backward(retain_graph=True)
-
+        
+        #  - Update params
         self.optimizer.step()
-        self.hs = self.hs.detach()
+        self.hidden_state = self.hidden_state.detach()
+        
+        #  - Calculate number of correct char predictions
+        outputs = torch.argmax(outputs, dim=-1)
+        
+        num_correct = torch.sum(outputs == y).float()
 
-        predictions = torch.argmax(predictions, dim=-1)
-        num_correct = torch.sum(predictions == y).float()
         # ========================
 
         # Note: scaling num_correct by seq_len because each sample has seq_len
@@ -306,12 +334,18 @@ class RNNTrainer(Trainer):
             #  - Loss calculation
             #  - Calculate number of correct predictions
             # ====== YOUR CODE: ======
-            predictions, self.hs = self.model(x, self.hs)
+            
+            #  - Forward pass
+            outputs, self.hidden_state = self.model(x, self.hidden_state)
+            
+            #  - Loss calculation
+            loss = self.loss_fn(outputs.transpose(dim0=1, dim1=2), y)
 
-            ppt_matrix = predictions.transpose(1, 2)
-            loss = self.loss_fn(ppt_matrix, y)
-            predictions = torch.argmax(predictions, dim=-1)
-            num_correct = torch.sum(predictions == y).float()
+            #  - Calculate number of correct predictions
+            outputs = torch.argmax(outputs, dim=-1)
+
+            num_correct = torch.sum(outputs == y).float()
+            
             # ========================
 
         return BatchResult(loss.item(), num_correct.item() / seq_len)
@@ -364,4 +398,39 @@ class VAETrainer(Trainer):
 
             # ========================
 
-        return BatchResult(loss.item(), 1 / data_loss.item())
+            
+        
+        return BatchResult(loss.item(), num_correct.item())
+
+
+
+class FineTuningTrainer(Trainer):
+    
+    def train_batch(self, batch) -> BatchResult:
+        
+        input_ids = batch["input_ids"].to(self.device)
+        attention_masks = batch["attention_mask"]
+        labels= batch["label"]
+        # TODO:
+        #  fill out the training loop.
+        # ====== YOUR CODE: ======
+
+        raise NotImplementedError()
+        
+        # ========================
+        
+        return BatchResult(loss, num_correct)
+        
+    def test_batch(self, batch) -> BatchResult:
+        
+        input_ids = batch["input_ids"].to(self.device)
+        attention_masks = batch["attention_mask"]
+        labels= batch["label"]
+        
+        with torch.no_grad():
+            # TODO:
+            #  fill out the training loop.
+            # ====== YOUR CODE: ======
+            raise NotImplementedError()
+            # ========================
+        return BatchResult(loss, num_correct)
