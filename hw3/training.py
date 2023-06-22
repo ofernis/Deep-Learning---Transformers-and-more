@@ -1,10 +1,12 @@
 import os
 import abc
 import sys
-import tqdm
 import torch
-from typing import Any, Callable
-from pathlib import Path
+import torch.nn as nn
+import tqdm.auto
+from torch import Tensor
+from typing import Any, Tuple, Callable, Optional, cast
+from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 
 from cs236781.train_results import FitResult, BatchResult, EpochResult
@@ -20,29 +22,29 @@ class Trainer(abc.ABC):
     - Single batch (train_batch/test_batch)
     """
 
-    def __init__(self, model, loss_fn, optimizer, device="cpu"):
+    def __init__(
+        self, model: nn.Module, device: Optional[torch.device] = None,
+    ):
         """
         Initialize the trainer.
         :param model: Instance of the model to train.
-        :param loss_fn: The loss function to evaluate with.
-        :param optimizer: The optimizer to train with.
         :param device: torch.device to run training on (CPU or GPU).
         """
         self.model = model
-        self.loss_fn = loss_fn
-        self.optimizer = optimizer
         self.device = device
-        model.to(self.device)
+
+        if self.device:
+            model.to(self.device)
 
     def fit(
         self,
         dl_train: DataLoader,
         dl_test: DataLoader,
-        num_epochs,
+        num_epochs: int,
         checkpoints: str = None,
         early_stopping: int = None,
-        print_every=1,
-        post_epoch_fn=None,
+        print_every: int = 1,
+        post_epoch_fn: Callable = None,
         **kw,
     ) -> FitResult:
         """
@@ -60,70 +62,75 @@ class Trainer(abc.ABC):
         :param post_epoch_fn: A function to call after each epoch completes.
         :return: A FitResult object containing train and test losses per epoch.
         """
-        actual_num_epochs = 0
-        train_loss, train_acc, test_loss, test_acc = [], [], [], []
 
-        best_acc = None
+        actual_num_epochs = 0
         epochs_without_improvement = 0
 
-        checkpoints = None
-        if checkpoints is not None:
-            checkpoints = f"{checkpoints}.pt"
-            Path(os.path.dirname(checkpoints)).mkdir(exist_ok=True)
-            if os.path.isfile(checkpoints):
-                print(f"*** Loading checkpoint file {checkpoints}")
-                saved_state = torch.load(checkpoints, map_location=self.device)
-                best_acc = saved_state.get("best_acc", best_acc)
-                epochs_without_improvement = saved_state.get(
-                    "ewi", epochs_without_improvement
-                )
-                self.model.load_state_dict(saved_state["model_state"])
+        train_loss, train_acc, test_loss, test_acc = [], [], [], []
+        best_acc = None
 
         for epoch in range(num_epochs):
-            save_checkpoint = False
             verbose = False  # pass this to train/test_epoch.
-            if epoch % print_every == 0 or epoch == num_epochs - 1:
+
+            if print_every > 0 and (
+                epoch % print_every == 0 or epoch == num_epochs - 1
+            ):
                 verbose = True
             self._print(f"--- EPOCH {epoch+1}/{num_epochs} ---", verbose)
 
-            # TODO:
-            #  Train & evaluate for one epoch
+            # TODO: Train & evaluate for one epoch
             #  - Use the train/test_epoch methods.
             #  - Save losses and accuracies in the lists above.
-            #  - Implement early stopping. This is a very useful and
-            #    simple regularization technique that is highly recommended.
             # ====== YOUR CODE: ======
-            
             # Train
             train_result = self.train_epoch(dl_train, **kw)
             train_loss += train_result.losses
             train_acc.append(train_result.accuracy)
-            
             # Test
-            test_result = self.test_epoch(dl_test, **kw)
+            test_result = self.test_epoch(dl_test, **kw) # **kw contains the model parameters
             test_loss += test_result.losses
             test_acc.append(test_result.accuracy)
-            
+
+            # ========================
+
+            # TODO:
+            #  - Optional: Implement early stopping. This is a very useful and
+            #    simple regularization technique that is highly recommended.
+            #  - Optional: Implement checkpoints. You can use the save_checkpoint
+            #    method on this class to save the model to the file specified by
+            #    the checkpoints argument.
             if best_acc is None or test_result.accuracy > best_acc:
+                # ====== YOUR CODE: ======
                 epochs_without_improvement = 0
                 best_acc = test_result.accuracy
 
                 if checkpoints is not None:
-                    dirname = os.path.dirname(checkpoints) or "."
-                    os.makedirs(dirname, exist_ok=True)
-                    torch.save({"model_state": self.model.state_dict()}, checkpoints)
-                    print(f"\n*** Saved checkpoint {checkpoints}")
+                    self.save_checkpoint(checkpoints)
+                # ========================
             else:
+                # ====== YOUR CODE: ======
+
                 epochs_without_improvement += 1
                 if early_stopping is not None and early_stopping == epochs_without_improvement:
                     break
 
+                # ========================
+
             if post_epoch_fn:
                 post_epoch_fn(epoch, train_result, test_result, verbose)
-            
-            # ========================
 
         return FitResult(actual_num_epochs, train_loss, train_acc, test_loss, test_acc)
+
+    def save_checkpoint(self, checkpoint_filename: str):
+        """
+        Saves the model in it's current state to a file with the given name (treated
+        as a relative path).
+        :param checkpoint_filename: File name or relative path to save to.
+        """
+        dirname = os.path.dirname(checkpoint_filename) or "."
+        os.makedirs(dirname, exist_ok=True)
+        torch.save({"model_state": self.model.state_dict()}, checkpoint_filename)
+        print(f"\n*** Saved checkpoint {checkpoint_filename}")
 
     def train_epoch(self, dl_train: DataLoader, **kw) -> EpochResult:
         """
@@ -149,7 +156,7 @@ class Trainer(abc.ABC):
     def train_batch(self, batch) -> BatchResult:
         """
         Runs a single batch forward through the model, calculates loss,
-        preforms back-propagation and uses the optimizer to update weights.
+        preforms back-propagation and updates weights.
         :param batch: A single batch of data  from a data loader (might
             be a tuple of data and labels or anything else depending on
             the underlying dataset.
@@ -198,12 +205,14 @@ class Trainer(abc.ABC):
                 num_samples = num_batches * dl.batch_size
 
         if verbose:
+            pbar_fn = tqdm.auto.tqdm
             pbar_file = sys.stdout
         else:
+            pbar_fn = tqdm.tqdm
             pbar_file = open(os.devnull, "w")
 
         pbar_name = forward_fn.__name__
-        with tqdm.tqdm(desc=pbar_name, total=num_batches, file=pbar_file) as pbar:
+        with pbar_fn(desc=pbar_name, total=num_batches, file=pbar_file) as pbar:
             dl_iter = iter(dl)
             for batch_idx in range(num_batches):
                 data = next(dl_iter)
@@ -223,28 +232,33 @@ class Trainer(abc.ABC):
                 f"Accuracy {accuracy:.1f})"
             )
 
+        if not verbose:
+            pbar_file.close()
+
         return EpochResult(losses=losses, accuracy=accuracy)
 
 
 class RNNTrainer(Trainer):
     def __init__(self, model, loss_fn, optimizer, device=None):
-        super().__init__(model, loss_fn, optimizer, device)
+        # ====== YOUR CODE: ======
+        self.model = model
+        self.loss_fn = loss_fn
+        self.optimizer = optimizer
+        self.device = device
+        self.hs = None
+        # ========================
 
     def train_epoch(self, dl_train: DataLoader, **kw):
         # TODO: Implement modifications to the base method, if needed.
         # ====== YOUR CODE: ======
-        
         self.hs = None
-        
         # ========================
         return super().train_epoch(dl_train, **kw)
 
     def test_epoch(self, dl_test: DataLoader, **kw):
         # TODO: Implement modifications to the base method, if needed.
         # ====== YOUR CODE: ======
-        
-        self.hs = None   
-        
+        self.hs = None
         # ========================
         return super().test_epoch(dl_test, **kw)
 
@@ -262,25 +276,17 @@ class RNNTrainer(Trainer):
         #  - Update params
         #  - Calculate number of correct char predictions
         # ====== YOUR CODE: ======
-        
         predictions, self.hs = self.model(x, self.hs)
-        
-        ppt_matrix = predictions.transpose(dim0=1, dim1=2)
-        
+        ppt_matrix = predictions.transpose(1, 2)
         self.optimizer.zero_grad()
-        
         loss = self.loss_fn(ppt_matrix, y)
-        
         loss.backward(retain_graph=True)
 
         self.optimizer.step()
-        
         self.hs = self.hs.detach()
 
         predictions = torch.argmax(predictions, dim=-1)
-        
         num_correct = torch.sum(predictions == y).float()
-    
         # ========================
 
         # Note: scaling num_correct by seq_len because each sample has seq_len
@@ -300,29 +306,46 @@ class RNNTrainer(Trainer):
             #  - Loss calculation
             #  - Calculate number of correct predictions
             # ====== YOUR CODE: ======
-            
             predictions, self.hs = self.model(x, self.hs)
 
             ppt_matrix = predictions.transpose(1, 2)
-            
             loss = self.loss_fn(ppt_matrix, y)
-            
             predictions = torch.argmax(predictions, dim=-1)
-            
             num_correct = torch.sum(predictions == y).float()
-        
             # ========================
 
         return BatchResult(loss.item(), num_correct.item() / seq_len)
 
-
 class VAETrainer(Trainer):
+    def __init__(
+            self,
+            model: nn.Module,
+            loss_fn: nn.Module,
+            optimizer: Optimizer,
+            device: Optional[torch.device] = None,
+    ):
+        """
+        Initialize the trainer.
+        :param model: Instance of the classifier model to train.
+        :param loss_fn: The loss function to evaluate with.
+        :param optimizer: The optimizer to train with.
+        :param device: torch.device to run training on (CPU or GPU).
+        """
+        super().__init__(model, device)
+        self.optimizer = optimizer
+        self.loss_fn = loss_fn
+
     def train_batch(self, batch) -> BatchResult:
         x, _ = batch
         x = x.to(self.device)  # Image batch (N,C,H,W)
         # TODO: Train a VAE on one batch.
         # ====== YOUR CODE: ======
-        raise NotImplementedError()
+        xr, z_mu, z_log_sigma2 = self.model.forward(x)
+        self.optimizer.zero_grad()
+
+        loss, data_loss, _ = self.loss_fn(x, xr, z_mu, z_log_sigma2)
+        loss.backward()
+        self.optimizer.step()
         # ========================
 
         return BatchResult(loss.item(), 1 / data_loss.item())
@@ -334,79 +357,11 @@ class VAETrainer(Trainer):
         with torch.no_grad():
             # TODO: Evaluate a VAE on one batch.
             # ====== YOUR CODE: ======
-            raise NotImplementedError()    
+
+            xr, z_mu, z_log_sigma2 = self.model.forward(x)
+
+            loss, data_loss, _ = self.loss_fn(x, xr, z_mu, z_log_sigma2)
+
             # ========================
 
         return BatchResult(loss.item(), 1 / data_loss.item())
-
-
-class TransformerEncoderTrainer(Trainer):
-    
-    def train_batch(self, batch) -> BatchResult:
-        
-        input_ids = batch['input_ids'].to(self.device)
-        attention_mask = batch['attention_mask'].float().to(self.device)
-        label = batch['label'].float().to(self.device)
-        
-        loss = None
-        num_correct = None
-        # TODO:
-        #  fill out the training loop.
-        # ====== YOUR CODE: ======
-        raise NotImplementedError()
-        # ========================
-        
-        
-        
-        return BatchResult(loss.item(), num_correct.item())
-        
-    def test_batch(self, batch) -> BatchResult:
-        with torch.no_grad():
-            input_ids = batch['input_ids'].to(self.device)
-            attention_mask = batch['attention_mask'].float().to(self.device)
-            label = batch['label'].float().to(self.device)
-            
-            loss = None
-            num_correct = None
-            
-            # TODO:
-            #  fill out the testing loop.
-            # ====== YOUR CODE: ======
-            raise NotImplementedError()
-            # ========================
-
-            
-        
-        return BatchResult(loss.item(), num_correct.item())
-
-
-class FineTuningTrainer(Trainer):
-    
-    def train_batch(self, batch) -> BatchResult:
-        
-        input_ids = batch["input_ids"].to(self.device)
-        attention_masks = batch["attention_mask"]
-        labels= batch["label"]
-        # TODO:
-        #  fill out the training loop.
-        # ====== YOUR CODE: ======
-
-        raise NotImplementedError()
-        
-        # ========================
-        
-        return BatchResult(loss, num_correct)
-        
-    def test_batch(self, batch) -> BatchResult:
-        
-        input_ids = batch["input_ids"].to(self.device)
-        attention_masks = batch["attention_mask"]
-        labels= batch["label"]
-        
-        with torch.no_grad():
-            # TODO:
-            #  fill out the training loop.
-            # ====== YOUR CODE: ======
-            raise NotImplementedError()
-            # ========================
-        return BatchResult(loss, num_correct)
