@@ -368,7 +368,7 @@ class MultilayerGRU(nn.Module):
         #  single tensor in a differentiable manner.
         # ====== YOUR CODE: ======
         
-        layer_output = torch.zeros(size=(batch_size, seq_len, self.out_dim),device=input.device)
+        layer_output = torch.zeros(size=(batch_size, seq_len, self.out_dim), device=input.device)
         
         for t in range(seq_len):
             
