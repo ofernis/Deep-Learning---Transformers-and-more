@@ -49,7 +49,7 @@ def remove_chars(text: str, chars_to_remove):
     n_removed = 0
     
     for c in chars_to_remove:
-        text_clean = text.replace(c, '')
+        text_clean = text_clean.replace(c, '')
         n_removed += text.count(c)
     
     # ========================
@@ -71,8 +71,9 @@ def chars_to_onehot(text: str, char_to_idx: dict) -> Tensor:
     """
     # TODO: Implement the embedding.
     # ====== YOUR CODE: ======
-    N = len(text)
-    D = len(char_to_idx)
+    
+    N, D = len(text), len(char_to_idx)
+
     result = torch.zeros(size=(N, D), dtype=torch.int8)
 
     for i, c in enumerate(text):
@@ -214,12 +215,12 @@ def generate_from_model(model, start_sequence, n_chars, char_maps, T):
             
             logits = hot_softmax(layer_output[0, -1], dim=-1, temperature=T)
             
-            y_pred = idx_to_char[torch.multinomial(input=logits, num_samples=1).item()]
+            sample = torch.multinomial(input=logits, num_samples=1).item()
             
-            out_text += y_pred
+            seq = idx_to_char[sample]
             
-            seq = seq[1:] + y_pred
-    
+            out_text += seq
+            
     # ========================
 
     return out_text
@@ -253,17 +254,11 @@ class SequenceBatchSampler(torch.utils.data.Sampler):
         idx = None  # idx should be a 1-d list of indices.
         # ====== YOUR CODE: ======
         
-        num_samples = len(self.dataset)
-
-        num_batches = num_samples // self.batch_size
-
-        num_indices = num_batches * self.batch_size
-
-        indices = torch.tensor(list(range(num_indices))) \
-                       .reshape(self.batch_size, num_batches) \
-                       .transpose(0, 1)
-
-        idx = [i for indices_slice in indices for i in indices_slice.tolist()]
+        num_batches = len(self.dataset) // self.batch_size
+        
+        idx = torch.arange(num_batches * self.batch_size) \
+                   .view(self.batch_size, -1).T \
+                   .reshape(1,-1).squeeze().tolist()
 
         # ========================
         return iter(idx)
@@ -312,22 +307,38 @@ class MultilayerGRU(nn.Module):
         #      sure to initialize them. See functions in torch.nn.init.
         # ====== YOUR CODE: ======
         
-        self.dropout = nn.Dropout(dropout)
-        
-        for layer in range(n_layers):     
-            input_dim = in_dim if layer == 0 else h_dim
+        for layer in range(self.n_layers):
+            input_dim = self.in_dim if layer == 0 else self.h_dim
             
-            self.add_module(name=f"Wxz_{layer}", module=nn.Linear(input_dim, self.h_dim, bias=False))
-            self.add_module(name=f"Wxr_{layer}", module=nn.Linear(input_dim, self.h_dim, bias=False))
-            self.add_module(name=f"Wxg_{layer}", module=nn.Linear(input_dim, self.h_dim, bias=False))
+            Wxz = nn.Linear(in_features=input_dim, out_features=self.h_dim, bias=False)
+            self.add_module(name=f"Wxz_{layer}",module=Wxz)
 
-            self.add_module(name=f"Whz_{layer}", module=nn.Linear(self.h_dim, self.h_dim, bias=True))
-            self.add_module(name=f"Whr_{layer}", module=nn.Linear(self.h_dim, self.h_dim, bias=True))
-            self.add_module(name=f"Whg_{layer}", module=nn.Linear(self.h_dim, self.h_dim, bias=True))
-        
-        self.add_module(name='Why', module=nn.Linear(self.h_dim, self.out_dim, bias=True))
-        
-        self.layer_params = self.parameters
+            Whz = nn.Linear(in_features=self.h_dim, out_features=self.h_dim, bias=True)
+            self.add_module(name=f"Whz_{layer}",module=Whz)
+
+            Wxr = nn.Linear(in_features=input_dim, out_features=self.h_dim, bias=False)
+            self.add_module(name=f"Wxr_{layer}",module=Wxr)
+
+            Whr = nn.Linear(in_features=self.h_dim, out_features=self.h_dim, bias=True)
+            self.add_module(name=f"Whr_{layer}",module=Whr)
+
+            Wxg = nn.Linear(in_features=input_dim, out_features=self.h_dim, bias=False)
+            self.add_module(name=f"Wxg_{layer}",module=Wxg)
+
+            Whg = nn.Linear(in_features=self.h_dim, out_features=self.h_dim, bias=True)
+            self.add_module(name=f"Whg_{layer}",module=Whg)
+
+            dropout = nn.Dropout(p=dropout)
+            self.add_module(name=f"Dropout_{layer}",module=dropout)
+
+            self.layer_params.append((Wxz, Whz, Wxr, Whr, Wxg, Whg, dropout))
+
+        # output
+        Why = nn.Linear(h_dim, out_dim, bias=True)
+
+        self.add_module(name='Why', module=Why)
+
+        self.layer_params.append(Why)
 
         # ========================
 
@@ -368,29 +379,38 @@ class MultilayerGRU(nn.Module):
         #  single tensor in a differentiable manner.
         # ====== YOUR CODE: ======
         
-        layer_output = torch.zeros(size=(batch_size, seq_len, self.out_dim), device=input.device)
+        device = input.device
         
+        layer_output = torch.zeros(size=(batch_size, seq_len, self.out_dim), device=device)
+
         for t in range(seq_len):
             
-            for layer in range(self.n_layers):
-                x_t = layer_input[:, t] if layer == 0 else self.dropout(layer_states[layer-1])
-                
-                Wxz = self.get_submodule(f"Wxz_{layer}")
-                Wxr = self.get_submodule(f"Wxr_{layer}")
-                Wxg = self.get_submodule(f"Wxg_{layer}")
-                Whz = self.get_submodule(f"Whz_{layer}")
-                Whr = self.get_submodule(f"Whr_{layer}")
-                Whg = self.get_submodule(f"Whg_{layer}")
-                
-                z_t = torch.sigmoid(Wxz(x_t) + Whz(layer_states[layer]))
-                r_t = torch.sigmoid(Wxr(x_t) + Whr(layer_states[layer]))
-                g_t = torch.tanh(Wxg(x_t) + Whg(r_t * layer_states[layer]))
-                layer_states[layer] = z_t * layer_states[layer] + (1 - z_t) * g_t
-                
-            Why = self.get_submodule(f"Why")
+            x_t = layer_input[:, t, :]
             
-            layer_output[:, t, :] = Why(layer_states[-1])
-            
+            layers_params = self.layer_params[:-1]
+
+            for layer, (params, state) in enumerate(zip(layers_params, layer_states)):
+                Wxz_t, Whz_t, Wxr_t, Whr_t, Wxg_t, Whg_t, drop = params
+                
+                state, x_t = state.to(device), x_t.to(device)
+                Wxz_t, Whz_t = Wxz_t.to(device), Whz_t.to(device)
+                Wxr_t, Whr_t = Wxr_t.to(device), Whr_t.to(device)
+                Wxg_t, Whg_t = Wxg_t.to(device), Whg_t.to(device)
+                
+                z_t = torch.sigmoid(Wxz_t(x_t) + Whz_t(state))
+                r_t = torch.sigmoid(Wxr_t(x_t) + Whr_t(state))
+                g_t = torch.tanh(Wxg_t(x_t) + Whg_t(state * r_t))
+                
+                h_t = z_t * state + (1 - z_t) * g_t
+                
+                layer_states[layer] = h_t
+                
+                x_t = drop(h_t)
+
+            wh_y = self.layer_params[-1].to(device=device)
+            wh_y = wh_y
+            layer_output[:, t, :] = wh_y(x_t)
+
         hidden_state = torch.stack(layer_states, dim=1)
         
         # ========================
