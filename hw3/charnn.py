@@ -1,4 +1,5 @@
 import re
+import random
 import torch
 import torch.nn as nn
 import torch.utils.data
@@ -48,7 +49,7 @@ def remove_chars(text: str, chars_to_remove):
     n_removed = 0
     
     for c in chars_to_remove:
-        text_clean = text.replace(c, '')
+        text_clean = text_clean.replace(c, '')
         n_removed += text.count(c)
     
     # ========================
@@ -70,13 +71,14 @@ def chars_to_onehot(text: str, char_to_idx: dict) -> Tensor:
     """
     # TODO: Implement the embedding.
     # ====== YOUR CODE: ======
-    N = len(text)
-    D = len(char_to_idx)
+    
+    N, D = len(text), len(char_to_idx)
+
     result = torch.zeros(size=(N, D), dtype=torch.int8)
 
     for i, c in enumerate(text):
         result[i][char_to_idx[c]] = 1
-        
+    
     # ========================
     return result
 
@@ -93,7 +95,7 @@ def onehot_to_chars(embedded_text: Tensor, idx_to_char: dict) -> str:
     """
     # TODO: Implement the reverse-embedding.
     # ====== YOUR CODE: ======
-        
+    
     result = ""
     
     for emb in embedded_text:
@@ -127,7 +129,7 @@ def chars_to_labelled_samples(text: str, char_to_idx: dict, seq_len: int, device
     #  3. Create the labels tensor in a similar way and convert to indices.
     #  Note that no explicit loops are required to implement this function.
     # ====== YOUR CODE: ======
-        
+    
     embedded_text = chars_to_onehot(text, char_to_idx).to(device)  # N_total, V
 
     num_of_samples = (embedded_text.shape[0] - 1) // seq_len # N
@@ -211,7 +213,7 @@ def generate_from_model(model, start_sequence, n_chars, char_maps, T):
             
             layer_output, hidden_state = model(embedded_seq, hidden_state)
             
-            logits = hot_softmax(layer_output[0, -1], dim=0, temperature=T)
+            logits = hot_softmax(layer_output[0, -1], dim=-1, temperature=T)
             
             sample = torch.multinomial(input=logits, num_samples=1).item()
             
@@ -283,8 +285,8 @@ class MultilayerGRU(nn.Module):
         assert in_dim > 0 and h_dim > 0 and out_dim > 0 and n_layers > 0
 
         self.in_dim = in_dim
-        self.out_dim = out_dim
         self.h_dim = h_dim
+        self.out_dim = out_dim
         self.n_layers = n_layers
         self.layer_params = []
 
@@ -340,6 +342,7 @@ class MultilayerGRU(nn.Module):
 
         # ========================
 
+    
     def forward(self, input: Tensor, hidden_state: Tensor = None):
         """
         :param input: Batch of sequences. Shape should be (B, S, I) where B is
@@ -375,7 +378,6 @@ class MultilayerGRU(nn.Module):
         #  Tip: You can use torch.stack() to combine multiple tensors into a
         #  single tensor in a differentiable manner.
         # ====== YOUR CODE: ======
-        m = 0
         
         device = input.device
         
