@@ -98,7 +98,14 @@ def part2_vae_hyperparams():
     )
     # TODO: Tweak the hyperparameters to generate a former president.
     # ====== YOUR CODE: ======
-   
+    
+    hypers['batch_size'] = 64
+    hypers['h_dim'] = 128
+    hypers['z_dim'] = 32
+    hypers['x_sigma2'] = 1e-4
+    hypers['learn_rate'] = 0.002
+    hypers['betas'] = (0.9, 0.9)
+    
     # ========================
     return hypers
 
@@ -106,12 +113,27 @@ def part2_vae_hyperparams():
 part2_q1 = r"""
 **Your answer:**
 
+The $\sigma^2$ hyperparameter is regarded as the variance of the distribution used to model the latent space, where the distribution is multivariate Gaussian, 
+parameterized by a mean vector and a covariance matrix. The $\sigma^2$ represents the diagonal elements of the covariance matrix, and it controls the amount of randomness (or diversity) in the generated samples. 
+Low values of $\sigma^2$ indicate that the latent space distribution is relatively narrow and that the generated samples are more densed around the mean. Hence, these samples will have less variability and
+will be more concentrated around a specific area in the data space. This might provide more deterministic outputs (which are more similar to the inputs) during the generation process.
+High values of $\sigma^2$ indicate that the latent space distribution is wider and that the generated samples tend to vary one from another. Here, the generated samples will domenstrate higher variability and randomness during the generation process.
+This can lead to higher diversity and to outputs which are less predictable, which means that the VAE will be able to explore more of the lant space regions.
+$\sigma^2$ controls the variance of the 
 
 """
 
 part2_q2 = r"""
 **Your answer:**
 
+1. The $\mathcal{L}_{\text{rec}}$ loss purpose is to minimize the difference (the norm) between the original image `x`, and the reconstruced image `xr`.  
+The $\mathcal{L}_{\text{KL}}$ loss purpose is to minimize the posterior $p(\bb{Z}|\bb{X})$ so we get closer to the image's distribution.
+
+2. KL-divergence loss term makes sure that the latent space representation will be closer to the prior distribution $p(\bb{Z})$.
+
+3. This effect benefit us by creating seperation between the encoder and the decoder.
+The decoder only needs a standard gaussian to be able to decode the image, and the KL-divergence makes sure the encoder's relevant parameters will converge to that gaussian.
+By that, we can seperate both parts of the VAE and generate new images with the decoder and some random noise.
 
 """
 
@@ -124,6 +146,9 @@ part2_q3 = r"""
 
 part2_q4 = r"""
 **Your answer:**
+
+We use the log variance for numerical stability.
+$\sigma$ can be very low and might cause numerical issues, using the log-space helps reduce these issues.
 
 
 """

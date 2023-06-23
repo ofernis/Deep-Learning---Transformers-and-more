@@ -81,7 +81,6 @@ class Trainer(abc.ABC):
                 self.model.load_state_dict(saved_state["model_state"])
 
         for epoch in range(num_epochs):
-            save_checkpoint = False
             verbose = False  # pass this to train/test_epoch.
             if epoch % print_every == 0 or epoch == num_epochs - 1:
                 verbose = True
@@ -115,12 +114,14 @@ class Trainer(abc.ABC):
             # ========================
 
             # Save model checkpoint if requested
-            if save_checkpoint and checkpoint_filename is not None:
+            if checkpoint_filename is not None:
                 saved_state = dict(
                     best_acc=best_acc,
                     ewi=epochs_without_improvement,
                     model_state=self.model.state_dict(),
                 )
+                dirname = os.path.dirname(checkpoint_filename) or "."
+                os.makedirs(dirname, exist_ok=True)
                 torch.save(saved_state, checkpoint_filename)
                 print(
                     f"*** Saved checkpoint {checkpoint_filename} " f"at epoch {epoch+1}"
@@ -331,7 +332,20 @@ class VAETrainer(Trainer):
         x = x.to(self.device)  # Image batch (N,C,H,W)
         # TODO: Train a VAE on one batch.
         # ====== YOUR CODE: ======
-        raise NotImplementedError()
+        
+        #  - Forward pass
+        xr, mu, log_sigma2 = self.model(x)
+        
+        #  - Backward pass
+        self.optimizer.zero_grad()
+        
+        loss, data_loss, _ = self.loss_fn(x, xr, mu, log_sigma2)
+        
+        loss.backward()
+        
+        #  - Update params
+        self.optimizer.step()
+        
         # ========================
 
         return BatchResult(loss.item(), 1 / data_loss.item())
@@ -343,7 +357,11 @@ class VAETrainer(Trainer):
         with torch.no_grad():
             # TODO: Evaluate a VAE on one batch.
             # ====== YOUR CODE: ======
-            raise NotImplementedError()    
+            
+            xr, mu, log_sigma2 = self.model(x)
+            
+            loss, data_loss, _ = self.loss_fn(x, xr, mu, log_sigma2)
+            
             # ========================
 
         return BatchResult(loss.item(), 1 / data_loss.item())
@@ -387,7 +405,6 @@ class TransformerEncoderTrainer(Trainer):
             
         
         return BatchResult(loss.item(), num_correct.item())
-
 
 
 class FineTuningTrainer(Trainer):

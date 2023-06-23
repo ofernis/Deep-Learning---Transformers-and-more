@@ -19,7 +19,17 @@ class EncoderCNN(nn.Module):
         #  use pooling or only strides, use any activation functions,
         #  use BN or Dropout, etc.
         # ====== YOUR CODE: ======
-        raise NotImplementedError()
+        
+        channels = [64, 128, 256, 512, out_channels]
+        
+        # Convolutional layers
+        for out_channel in channels:
+            modules.append(nn.Conv2d(in_channels, out_channel, kernel_size=5, stride=2, padding=2))
+            # modules.append(nn.MaxPool2d(kernel_size=2))
+            modules.append(nn.BatchNorm2d(out_channel))
+            modules.append(nn.ReLU(inplace=True))
+            in_channels = out_channel
+
         # ========================
         self.cnn = nn.Sequential(*modules)
 
@@ -42,13 +52,26 @@ class DecoderCNN(nn.Module):
         #  output should be a batch of images, with same dimensions as the
         #  inputs to the Encoder were.
         # ====== YOUR CODE: ======
-        raise NotImplementedError()
+        
+        channels = [512, 256, 128, 64, out_channels]
+        
+        # Convolutional layers
+        for i, out in enumerate(channels):
+            modules.append(nn.ConvTranspose2d(in_channels, out, kernel_size=5, stride=2, padding=2, output_padding=1))
+            
+            if i == len(channels) - 1:
+                continue
+            
+            modules.append(nn.BatchNorm2d(out))
+            modules.append(nn.ReLU(inplace=True))
+            
+            in_channels = out
+            
         # ========================
         self.cnn = nn.Sequential(*modules)
 
     def forward(self, h):
-        # Tanh to scale to [-1, 1] (same dynamic range as original images).
-        return torch.tanh(self.cnn(h))
+        return self.cnn(h)
 
 
 class VAE(nn.Module):
@@ -66,11 +89,19 @@ class VAE(nn.Module):
         self.features_decoder = features_decoder
         self.z_dim = z_dim
 
-        self.features_shape, n_features = self._check_features(in_size)
+        self.features_shape, self.n_features = self._check_features(in_size)
 
         # TODO: Add more layers as needed for encode() and decode().
         # ====== YOUR CODE: ======
-        raise NotImplementedError()
+        
+        self.mu = nn.Linear(self.n_features, self.z_dim, bias=True)
+        
+        self.log_sigma2 = nn.Linear(self.n_features, self.z_dim, bias=True)
+        
+        self.flatten = nn.Flatten()
+        
+        self.sample2decoder = nn.Linear(self.z_dim, self.n_features, bias=True)
+        
         # ========================
 
     def _check_features(self, in_size):
@@ -91,7 +122,20 @@ class VAE(nn.Module):
         #     log_sigma2 (mean and log variance) of q(Z|x).
         #  2. Apply the reparametrization trick to obtain z.
         # ====== YOUR CODE: ======
-        raise NotImplementedError()
+        device = next(self.parameters()).device
+        
+        h = self.flatten(self.features_encoder(x)) # shape: (N, 1024*2*2)
+        
+        mu = self.mu(h)
+        
+        log_sigma2 = self.log_sigma2(h)
+        
+        mean = torch.zeros(size=(self.z_dim,), device=device)
+        sd = torch.ones(size=(self.z_dim,), device=device)
+        r = torch.normal(mean, sd)
+        
+        z = mu + r * torch.sqrt(torch.exp(log_sigma2))
+
         # ========================
 
         return z, mu, log_sigma2
@@ -102,7 +146,11 @@ class VAE(nn.Module):
         #  1. Convert latent z to features h with a linear layer.
         #  2. Apply features decoder.
         # ====== YOUR CODE: ======
-        raise NotImplementedError()
+        
+        h = self.sample2decoder(z).reshape(z.shape[0], *self.features_shape)
+        
+        x_rec = self.features_decoder(h)
+    
         # ========================
 
         # Scale to [-1, 1] (same dynamic range as original images).
@@ -121,7 +169,13 @@ class VAE(nn.Module):
             #    Instead of sampling from N(psi(z), sigma2 I), we'll just take
             #    the mean, i.e. psi(z).
             # ====== YOUR CODE: ======
-            raise NotImplementedError()
+            
+            mu = torch.zeros(size=(n, self.z_dim), device=device)
+            sd = torch.ones(size=(n, self.z_dim), device=device)
+            z = torch.normal(mean=mu, std=sd).to(device)
+            
+            samples = self.decode(z)
+                        
             # ========================
 
         # Detach and move to CPU for display purposes
@@ -154,7 +208,25 @@ def vae_loss(x, xr, z_mu, z_log_sigma2, x_sigma2):
     #  1. The covariance matrix of the posterior is diagonal.
     #  2. You need to average over the batch dimension.
     # ====== YOUR CODE: ======
-    raise NotImplementedError()
+    
+    x = x.flatten(start_dim=1, end_dim=-1)
+    xr = xr.flatten(start_dim=1, end_dim=-1)
+    
+    dx = x.shape[1]
+    dz = z_mu.shape[1]
+    
+    sigma_z = torch.exp(z_log_sigma2)
+    
+    data_loss = (torch.norm(x - xr, dim=1, p=2)**2) / (x_sigma2 * dx)
+    
+    kldiv_loss = torch.sum(sigma_z, dim=1) + torch.norm(z_mu, dim=1, p=2)**2 - dz - torch.sum(z_log_sigma2, dim=1)
+        
+    data_loss = torch.mean(data_loss, dim=0)
+    
+    kldiv_loss = torch.mean(kldiv_loss, dim=0)
+    
+    loss = data_loss + kldiv_loss
+    
     # ========================
 
     return loss, data_loss, kldiv_loss
