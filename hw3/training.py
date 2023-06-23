@@ -273,17 +273,18 @@ class RNNTrainer(Trainer):
         #  - Forward pass
         outputs, self.hidden_state = self.model(x, self.hidden_state)
         
+        self.hidden_state = self.hidden_state.detach()
+        
         #  - Calculate total loss over sequence
         self.optimizer.zero_grad()
         
         loss = self.loss_fn(outputs.transpose(dim0=1, dim1=2), y)
         
         #  - Backward pass: truncated back-propagation through time
-        loss.backward(retain_graph=True)
+        loss.backward()
         
         #  - Update params
         self.optimizer.step()
-        self.hidden_state = self.hidden_state.detach()
         
         #  - Calculate number of correct char predictions
         outputs = torch.argmax(outputs, dim=-1)
