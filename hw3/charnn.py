@@ -328,10 +328,10 @@ class MultilayerGRU(nn.Module):
             Whg = nn.Linear(in_features=self.h_dim, out_features=self.h_dim, bias=True)
             self.add_module(name=f"Whg_{layer}",module=Whg)
 
-            dropout = nn.Dropout(p=dropout)
-            self.add_module(name=f"Dropout_{layer}",module=dropout)
+            dropout_layer = nn.Dropout(p=dropout)
+            self.add_module(name=f"Dropout_{layer}", module=dropout_layer)
 
-            self.layer_params.append((Wxz, Whz, Wxr, Whr, Wxg, Whg, dropout))
+            self.layer_params.append((Wxz, Whz, Wxr, Whr, Wxg, Whg, dropout_layer))
 
         # output
         Why = nn.Linear(h_dim, out_dim, bias=True)

@@ -97,11 +97,11 @@ class Trainer(abc.ABC):
             
             train_result = self.train_epoch(dl_train, **kw)
             train_loss += train_result.losses
-            train_acc += train_result.accuracy
+            train_acc.append(train_result.accuracy)
             
             test_result = self.test_epoch(dl_test, **kw)
             test_loss += test_result.losses
-            test_acc += test_result.accuracy
+            test_acc.append(test_result.accuracy)
             
             if best_acc is None or test_result.accuracy > best_acc:
                 epochs_without_improvement = 0

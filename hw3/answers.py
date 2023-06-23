@@ -25,9 +25,9 @@ def part1_rnn_hyperparams():
     hypers['batch_size'] = 512
     hypers['seq_len'] = 64
     hypers['h_dim'] = 1024
-    hypers['n_layers'] = 2
+    hypers['n_layers'] = 3
     hypers['dropout'] = 0.4
-    hypers['learn_rate'] = 0.
+    hypers['learn_rate'] = 1e-3
     hypers['lr_sched_factor'] = 0.8 
     hypers['lr_sched_patience'] = 6
     # ========================
@@ -81,7 +81,6 @@ Thus, there is a higher chance that we will produce nonesence sentences.
 
 3. As we said before, a low $T$ will result less uniform distributions.
 Thus, the sampling will be very close to argmax sampling, which means the outputs will be almost identical to each other (and to the most probable, single sentence that can be produced).
-
 
 """
 # ==============
