@@ -98,28 +98,75 @@ def sliding_window_attention(q, k, v, window_size, padding_mask=None):
     #    (both for tokens that aren't in the window, and for tokens that correspond to padding according to the 'padding mask').
     # Aside from these two rules, you are free to implement the function as you wish. 
     # ====== YOUR CODE: ======
+    # no_heads_flag = False
     
-    # d = q.shape[-1]
-    # B = torch.zeros(d, dtype=float)
+    # if len(q.size()) == 3:
+    #     no_heads_flag = True
+    #     q = q.unsqueeze(1) # Batch, num_heads, SeqLen, Dims
+    #     k = k.unsqueeze(1) # Batch, num_heads, SeqLen, Dims
     
-    # for batch in range(q.shape[0]):
-    #     qi = q[batch] #[SeqLen, Dims]
-    #     ki = j[batch] #[SeqLen, Dims]
-    #     for i in range(q.shape[1]):
-    #         for j in range(-1 * (window_size / 2), window_size / 2):
+    # q = q.transpose(1, 2) # Batch, SeqLen, num_heads, Dims
+    # k = k.transpose(1, 2) # Batch, SeqLen, num_heads, Dims
+    
+    # diagonal_attn = sliding_chunks_matmul_qk(q, k, window_size, 0)
+    
+    # # d = q.shape[-1]
+    # # B = torch.zeros(d, dtype=float)
+    
+    # # for batch in range(q.shape[0]):
+    # #     qi = q[batch] #[SeqLen, Dims]
+    # #     ki = j[batch] #[SeqLen, Dims]
+    # #     for i in range(q.shape[1]):
+    # #         for j in range(-1 * (window_size / 2), window_size / 2):
                 
                 
-    # B /= torch.sqrt(d)
+    # # B /= torch.sqrt(d)
     
-    # attention = torch.softmax(B, dim = 1)
+    # # attention = torch.softmax(B, dim = 1)
     
-    # values = v
+    # # values = v
+    # if no_heads_flag:
+    #     print('fuck')
+    #     diagonal_attn = diagonal_attn.squeeze(1) # Batch, SeqLen, Dims
     
-    diagonal_attn = sliding_chunks_matmul_qk(q, k, window_size, 0)
+    # Getting the number of queries and keys
+    num_queries, num_keys = q.size(0), k.size(0)
+
+    # Calculate the range of key indices for each query
+    lower_bounds = torch.clamp(torch.arange(num_queries) - window_size / 2, 0, num_keys)
+    upper_bounds = torch.clamp(torch.arange(num_queries) + window_size / 2, 0, num_keys)
+
+    # Create sparse indices for the relevant entries in the attention matrix
+    indices = []
+    vals = []
+    
+    
+        for i in range(num_queries):
+            lower_bound = int(lower_bounds[i].item())
+            upper_bound = int(upper_bounds[i].item())
+            print(type(lower_bound), type(upper_bound))
+            indices_i = torch.arange(lower_bound, upper_bound)
+            dot_product_i = torch.matmul(q[i], k[i, lower_bound:upper_bound].T)
+            nonzero_mask = dot_product_i != 0
+            indices.append(indices_i[nonzero_mask])
+            vals.append(dot_product_i[nonzero_mask])
+        indices = torch.cat(indices)
+        vals = torch.cat(vals)
+
+    # Create a sparse tensor for the relevant entries
+    B = torch.sparse.FloatTensor(indices.unsqueeze(0).T, vals, torch.Size([num_queries, num_keys]))
+
+    B /= torch.sqrt(q.shape[-1])
+
+    # Compute the softmax attention weights
+    attention = torch.sparse.softmax(B, dim=-1)
+
+    # Compute the attention matrix
+    values = torch.sparse.matmul(attention, v)
     
     # ========================
 
-
+    # return diagonal_attn
     return values, attention
 
 
