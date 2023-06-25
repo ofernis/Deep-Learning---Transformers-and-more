@@ -40,18 +40,21 @@ def sliding_window_attention(q, k, v, window_size, padding_mask=None):
     
     num_heads = q.shape[1]
     
-    q = q.reshape(batch_size * num_heads, seq_len, embed_dim) # Batch*num_heads, SeqLen, Dims
-    k = k.reshape(batch_size * num_heads, seq_len, embed_dim).transpose(1,2) # Batch*num_heads, Dims, SeqLen
+    if padding_mask is not None:
+        q = q.masked_fill(padding_mask.unsqueeze(1).unsqueeze(3).expand_as(q), 0)
+        k = k.masked_fill(padding_mask.unsqueeze(1).unsqueeze(3).expand_as(k), 0)
+        v = v.masked_fill(padding_mask.unsqueeze(1).unsqueeze(3).expand_as(v), 0)
     
-    B = torch.zeros(size=(batch_size * num_heads, seq_len, seq_len)) # Batch*num_heads, SeqLen, SeqLen
+    q = q.reshape(batch_size * num_heads, seq_len, embed_dim) # Batch*num_heads, SeqLen, Dims
+    k = k.reshape(batch_size * num_heads, seq_len, embed_dim).transpose(1, 2) # Batch*num_heads, Dims, SeqLen
+    
+    B = torch.full(size=(batch_size * num_heads, seq_len, seq_len), fill_value=float('-inf')) # Batch*num_heads, SeqLen, SeqLen
     
     for row in range(seq_len):
         start_col = max(0, row - window_size//2)
-        end_col = min(seq_len, row + window_size//2) + 1 # +1 because of how slicing works
-        intermediate = q[:, row].unsqueeze(1) @ k[:, :, start_col:end_col]
-        B[:, row, :start_col] = float('-inf')
-        B[:, row, end_col:] = float('-inf')
-        B[:, row, start_col:end_col] += intermediate.squeeze(1)
+        end_col = min(seq_len, row + window_size//2)
+        intermediate = q[:, row].unsqueeze(1) @ k[:, :, start_col:end_col + 1]
+        B[:, row, start_col:end_col + 1] = intermediate.squeeze(1)
     
     B /= math.sqrt(embed_dim)
     
@@ -109,7 +112,6 @@ class MultiHeadAttention(nn.Module):
         # TODO:
         # call the sliding window attention function you implemented
         # ====== YOUR CODE: ======
-        padding_mask = padding_mask
         values, attention = sliding_window_attention(q, k, v, self.window_size, padding_mask)
         # ========================
 
@@ -192,7 +194,20 @@ class EncoderLayer(nn.Module):
         #   3) Apply a feed-forward layer to the output of step 2, and then apply dropout again.
         #   4) Add a second residual connection and normalize again.
         # ====== YOUR CODE: ======
-        raise NotImplementedError()
+        attn_outputs = self.self_attn(x, padding_mask) # Apply attention to the input x
+        attn_outputs = self.dropout(attn_outputs) # apply dropout
+        
+        residual1 = x + attn_outputs  # residual connection
+        norm1_outputs = self.norm1(residual1) # normalize
+                
+        ff_outputs = self.feed_forward(norm1_outputs) # feed forward
+        ff_outputs = self.dropout(ff_outputs) # apply dropout
+        
+        residual2 = norm1_outputs + ff_outputs # residual connection
+        norm2_outputs = self.norm2(residual2) # normalize
+        
+        x = norm2_outputs
+        
         # ========================
         
         return x
@@ -242,12 +257,29 @@ class Encoder(nn.Module):
         #  5) Apply the classification MLP to the output vector corresponding to the special token [CLS] 
         #     (always the first token) to receive the logits.
         # ====== YOUR CODE: ======
-        raise NotImplementedError()
+        
+        #  1) Apply the embedding layer to the input.
+        embedded_sentence = self.encoder_embedding(sentence)
+        
+        #  2) Apply positional encoding to the output of step 1.
+        encoded_embedding = self.positional_encoding(embedded_sentence)
+        
+        #  3) Apply a dropout layer to the output of the positional encoding.
+        encoded_embedding = self.dropout(encoded_embedding)
+        
+        #  4) Apply the specified number of encoder layers.
+        layer_inputs = encoded_embedding
+        for encoder_layer in self.encoder_layers:
+            layer_inputs = encoder_layer(layer_inputs, padding_mask)
+        layers_output = layer_inputs
+        
+        #  5) Apply the classification MLP to the output vector corresponding to the special token [CLS] 
+        #     (always the first token) to receive the logits.
+        output = self.classification_mlp(layers_output[:, 0]).squeeze(1)
         
         # ========================
         
-        
-        return output  
+        return output
     
     def predict(self, sentence, padding_mask):
         '''
