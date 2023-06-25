@@ -3,73 +3,6 @@ import torch.nn as nn
 import math
 import torch.nn.functional as F
 
-def _skew(x, direction, padding_value):
-    '''Convert diagonals into columns (or columns into diagonals depending on `direction`'''
-    x_padded = F.pad(x, direction, value=padding_value)
-    x_padded = x_padded.view(*x_padded.size()[:-2], x_padded.size(-1), x_padded.size(-2))
-    return x_padded
-
-def _chunk(x, w):
-    '''convert into overlapping chunkings. Chunk size = 2w, overlap size = w'''
-
-    # non-overlapping chunks of size = 2w
-    x = x.view(x.size(0), x.size(1) // (w * 2), w * 2, x.size(2))
-
-    # use `as_strided` to make the chunks overlap with an overlap size = w
-    chunk_size = list(x.size())
-    chunk_size[1] = chunk_size[1] * 2 - 1
-
-    chunk_stride = list(x.stride())
-    chunk_stride[1] = chunk_stride[1] // 2
-    return x.as_strided(size=chunk_size, stride=chunk_stride)
-
-
-def sliding_chunks_matmul_qk(q: torch.Tensor, k: torch.Tensor, w: int, padding_value: float):
-    '''Matrix multiplicatio of query x key tensors using with a sliding window attention pattern.
-    This implementation splits the input into overlapping chunks of size 2w (e.g. 512 for pretrained Longformer)
-    with an overlap of size w'''
-    bsz, seqlen, num_heads, head_dim = q.size()
-    assert seqlen % (w * 2) == 0
-    assert q.size() == k.size()
-
-    chunks_count = seqlen // w - 1
-
-    # group bsz and num_heads dimensions into one, then chunk seqlen into chunks of size w * 2
-    q = q.transpose(1, 2).reshape(bsz * num_heads, seqlen, head_dim)
-    k = k.transpose(1, 2).reshape(bsz * num_heads, seqlen, head_dim)
-
-    chunk_q = _chunk(q, w)
-    chunk_k = _chunk(k, w)
-
-    # matrix multipication
-    # bcxd: bsz*num_heads x chunks x 2w x head_dim
-    # bcyd: bsz*num_heads x chunks x 2w x head_dim
-    # bcxy: bsz*num_heads x chunks x 2w x 2w
-    chunk_attn = torch.einsum('bcxd,bcyd->bcxy', (chunk_q, chunk_k))  # multiply
-
-    # convert diagonals into columns
-    diagonal_chunk_attn = _skew(chunk_attn, direction=(0, 0, 0, 1), padding_value=padding_value)
-
-    # allocate space for the overall attention matrix where the chunks are compined. The last dimension
-    # has (w * 2 + 1) columns. The first (w) columns are the w lower triangles (attention from a word to
-    # w previous words). The following column is attention score from each word to itself, then
-    # followed by w columns for the upper triangle.
-
-    diagonal_attn = diagonal_chunk_attn.new_empty((bsz * num_heads, chunks_count + 1, w, w * 2 + 1))
-
-    # copy parts from diagonal_chunk_attn into the compined matrix of attentions
-    # - copying the main diagonal and the upper triangle
-    diagonal_attn[:, :-1, :, w:] = diagonal_chunk_attn[:, :, :w, :w + 1]
-    diagonal_attn[:, -1, :, w:] = diagonal_chunk_attn[:, -1, w:, :w + 1]
-    # - copying the lower triangle
-    diagonal_attn[:, 1:, :, :w] = diagonal_chunk_attn[:, :, - (w + 1):-1, w + 1:]
-    diagonal_attn[:, 0, 1:w, 1:w] = diagonal_chunk_attn[:, 0, :w - 1, 1 - w:]
-
-    # separate bsz and num_heads dimensions again
-    diagonal_attn = diagonal_attn.view(bsz, num_heads, seqlen, 2 * w + 1).transpose(2, 1)
-
-    # mask_invalid_locations(diagonal_attn, w, 1, False)
-    return diagonal_attn
 
 def sliding_window_attention(q, k, v, window_size, padding_mask=None):
     '''
@@ -98,75 +31,41 @@ def sliding_window_attention(q, k, v, window_size, padding_mask=None):
     #    (both for tokens that aren't in the window, and for tokens that correspond to padding according to the 'padding mask').
     # Aside from these two rules, you are free to implement the function as you wish. 
     # ====== YOUR CODE: ======
-    # no_heads_flag = False
+    no_heads_flag = False
     
-    # if len(q.size()) == 3:
-    #     no_heads_flag = True
-    #     q = q.unsqueeze(1) # Batch, num_heads, SeqLen, Dims
-    #     k = k.unsqueeze(1) # Batch, num_heads, SeqLen, Dims
+    if len(q.size()) == 3:
+        no_heads_flag = True
+        q = q.unsqueeze(1) # Batch, num_heads, SeqLen, Dims
+        k = k.unsqueeze(1) # Batch, num_heads, SeqLen, Dims
     
-    # q = q.transpose(1, 2) # Batch, SeqLen, num_heads, Dims
-    # k = k.transpose(1, 2) # Batch, SeqLen, num_heads, Dims
+    num_heads = q.shape[1]
     
-    # diagonal_attn = sliding_chunks_matmul_qk(q, k, window_size, 0)
+    q = q.reshape(batch_size * num_heads, seq_len, embed_dim) # Batch*num_heads, SeqLen, Dims
+    k = k.reshape(batch_size * num_heads, seq_len, embed_dim).transpose(1,2) # Batch*num_heads, Dims, SeqLen
     
-    # # d = q.shape[-1]
-    # # B = torch.zeros(d, dtype=float)
+    B = torch.zeros(size=(batch_size * num_heads, seq_len, seq_len)) # Batch*num_heads, SeqLen, SeqLen
     
-    # # for batch in range(q.shape[0]):
-    # #     qi = q[batch] #[SeqLen, Dims]
-    # #     ki = j[batch] #[SeqLen, Dims]
-    # #     for i in range(q.shape[1]):
-    # #         for j in range(-1 * (window_size / 2), window_size / 2):
-                
-                
-    # # B /= torch.sqrt(d)
+    for row in range(seq_len):
+        start_col = max(0, row - window_size//2)
+        end_col = min(seq_len, row + window_size//2) + 1 # +1 because of how slicing works
+        intermediate = q[:, row].unsqueeze(1) @ k[:, :, start_col:end_col]
+        B[:, row, :start_col] = float('-inf')
+        B[:, row, end_col:] = float('-inf')
+        B[:, row, start_col:end_col] += intermediate.squeeze(1)
     
-    # # attention = torch.softmax(B, dim = 1)
+    B /= math.sqrt(embed_dim)
     
-    # # values = v
-    # if no_heads_flag:
-    #     print('fuck')
-    #     diagonal_attn = diagonal_attn.squeeze(1) # Batch, SeqLen, Dims
+    B = B.reshape(batch_size, num_heads, seq_len, seq_len) # Batch, num_heads, SeqLen, SeqLen
     
-    # Getting the number of queries and keys
-    num_queries, num_keys = q.size(0), k.size(0)
-
-    # Calculate the range of key indices for each query
-    lower_bounds = torch.clamp(torch.arange(num_queries) - window_size / 2, 0, num_keys)
-    upper_bounds = torch.clamp(torch.arange(num_queries) + window_size / 2, 0, num_keys)
-
-    # Create sparse indices for the relevant entries in the attention matrix
-    indices = []
-    vals = []
+    if no_heads_flag:
+        B = B.squeeze(1)
     
+    attention = F.softmax(B, dim=-1)
     
-        for i in range(num_queries):
-            lower_bound = int(lower_bounds[i].item())
-            upper_bound = int(upper_bounds[i].item())
-            print(type(lower_bound), type(upper_bound))
-            indices_i = torch.arange(lower_bound, upper_bound)
-            dot_product_i = torch.matmul(q[i], k[i, lower_bound:upper_bound].T)
-            nonzero_mask = dot_product_i != 0
-            indices.append(indices_i[nonzero_mask])
-            vals.append(dot_product_i[nonzero_mask])
-        indices = torch.cat(indices)
-        vals = torch.cat(vals)
-
-    # Create a sparse tensor for the relevant entries
-    B = torch.sparse.FloatTensor(indices.unsqueeze(0).T, vals, torch.Size([num_queries, num_keys]))
-
-    B /= torch.sqrt(q.shape[-1])
-
-    # Compute the softmax attention weights
-    attention = torch.sparse.softmax(B, dim=-1)
-
-    # Compute the attention matrix
-    values = torch.sparse.matmul(attention, v)
+    values = torch.matmul(attention, v)
     
     # ========================
 
-    # return diagonal_attn
     return values, attention
 
 
@@ -210,7 +109,8 @@ class MultiHeadAttention(nn.Module):
         # TODO:
         # call the sliding window attention function you implemented
         # ====== YOUR CODE: ======
-        raise NotImplementedError()
+        padding_mask = padding_mask
+        values, attention = sliding_window_attention(q, k, v, self.window_size, padding_mask)
         # ========================
 
         values = values.permute(0, 2, 1, 3) # [Batch, SeqLen, Head, Dims]
