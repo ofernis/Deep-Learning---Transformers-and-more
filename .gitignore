@@ -1,3 +1,9 @@
 hw3/__pycache__/__init__.cpython-38.pyc
 hw3/__pycache__/charnn.cpython-38.pyc
 Part1_Sequence.ipynb
+finetuned_last_2.pt
+fit_result_finetune_2.pkl
+cs236781/__pycache__/__init__.cpython-38.pyc
+cs236781/__pycache__/plot.cpython-38.pyc
+cs236781/__pycache__/train_results.cpython-38.pyc
+hw3/__pycache__/training.cpython-38.pyc

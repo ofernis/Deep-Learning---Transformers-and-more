@@ -382,24 +382,24 @@ class TransformerEncoderTrainer(Trainer):
         #  fill out the training loop.
         # ====== YOUR CODE: ======
         
-        #  - Forward pass
-        y_pred = self.model(input_ids, attention_mask)
+        self.model.train()
         
-        #  - Backward pass
         self.optimizer.zero_grad()
+        
+        #  - Forward pass
+        y_pred = self.model.predict(input_ids, attention_mask)
         
         loss = self.loss_fn(y_pred, label)
         
+        #  - Backward pass
         loss.backward()
         
-        num_correct = torch.sum(label == y_pred)
-        
-        #  - Update params
         self.optimizer.step()
         
+        # Calculate num_correct for accuracy
+        num_correct = torch.sum(label == y_pred)
+        
         # ========================
-        
-        
         
         return BatchResult(loss.item(), num_correct.item())
         
@@ -416,7 +416,9 @@ class TransformerEncoderTrainer(Trainer):
             #  fill out the testing loop.
             # ====== YOUR CODE: ======
             
-            y_pred = self.model(input_ids, attention_mask)
+            self.model.eval()
+            
+            y_pred = self.model.predict(input_ids, attention_mask)
             
             loss = self.loss_fn(y_pred, label)
             
@@ -440,7 +442,21 @@ class FineTuningTrainer(Trainer):
         #  fill out the training loop.
         # ====== YOUR CODE: ======
 
-        raise NotImplementedError()
+        #  - Forward pass
+        output = self.model(input_ids, attention_masks, labels=labels)
+        logits = output.logits
+        
+        #  - Backward pass
+        self.optimizer.zero_grad()
+        loss = output.loss
+        loss.backward()
+        
+        #  - Calculate number of correct char predictions
+        y_pred = torch.argmax(logits, dim=-1)
+        num_correct = torch.sum(y_pred == labels).float()
+        
+        #  - Update params
+        self.optimizer.step()
         
         # ========================
         
@@ -456,6 +472,16 @@ class FineTuningTrainer(Trainer):
             # TODO:
             #  fill out the training loop.
             # ====== YOUR CODE: ======
-            raise NotImplementedError()
+
+            output = self.model(input_ids, attention_masks, labels=labels)
+            
+            logits = output.logits
+            
+            loss = output.loss
+            
+            y_pred = torch.argmax(logits, dim=-1)
+            
+            num_correct = torch.sum(y_pred == labels)
+            
             # ========================
         return BatchResult(loss, num_correct)

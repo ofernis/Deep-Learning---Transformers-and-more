@@ -47,23 +47,51 @@ def sliding_window_attention(q, k, v, window_size, padding_mask=None):
     
     q = q.reshape(batch_size * num_heads, seq_len, embed_dim) # Batch*num_heads, SeqLen, Dims
     k = k.reshape(batch_size * num_heads, seq_len, embed_dim).transpose(1, 2) # Batch*num_heads, Dims, SeqLen
+
+    # Sliding window parameters
+    stride = 1
+    padding = window_size // 2
+
+    # Add padding to k (to perform the sliding window on its columns)
+    padded_tensor = torch.nn.functional.pad(k, (padding, padding))
+
+    # Unfold the padded tensor with the specified window size and stride
+    unfolded_tensor = padded_tensor.unfold(-1, window_size+1, stride)
+
+    # Reshape the unfolded tensor to match the desired output shape
+    new_tensor = unfolded_tensor.transpose(1, 2)
+
+    # Calculate all the attention values (still not diagonal)
+    attn_rows = torch.matmul(q.unsqueeze(2), new_tensor).squeeze(2)
+
+    # Calculate the size of the new matrix
+    rows, cols = seq_len, window_size + 1
+    new_cols = cols + rows - 1
     
-    B = torch.full(size=(batch_size * num_heads, seq_len, seq_len), fill_value=float('-inf')) # Batch*num_heads, SeqLen, SeqLen
+    # Create an index tensor for selecting elements from the input matrix
+    index_tensor = torch.arange(new_cols).unsqueeze(0) - torch.arange(rows).unsqueeze(1)
+
+    # Mask out the elements outside the range of the input matrix
+    mask = (index_tensor >= 0) & (index_tensor < cols)
+    mask = mask.repeat(batch_size*num_heads,1).reshape(batch_size*num_heads, seq_len, -1)
+
+    # Select elements from the input matrix using the index tensor and mask
+    attention = torch.full(size=(batch_size * num_heads, rows, new_cols), fill_value=-1e9) # Batch*num_heads, SeqLen, SeqLen
+
+    # Insert calculated rows into correct indices
+    attention[mask] = attn_rows.flatten()
     
-    for row in range(seq_len):
-        start_col = max(0, row - window_size//2)
-        end_col = min(seq_len, row + window_size//2)
-        intermediate = q[:, row].unsqueeze(1) @ k[:, :, start_col:end_col + 1]
-        B[:, row, start_col:end_col + 1] = intermediate.squeeze(1)
+    # Remove paddings
+    attention = attention[:, :, padding:-padding]
     
-    B /= math.sqrt(embed_dim)
+    attention /= math.sqrt(embed_dim)
     
-    B = B.reshape(batch_size, num_heads, seq_len, seq_len) # Batch, num_heads, SeqLen, SeqLen
+    attention = attention.reshape(batch_size, num_heads, seq_len, seq_len) # Batch, num_heads, SeqLen, SeqLen
     
     if no_heads_flag:
-        B = B.squeeze(1)
+        attention = attention.squeeze(1)
     
-    attention = F.softmax(B, dim=-1)
+    attention = F.softmax(attention, dim=-1)
     
     values = torch.matmul(attention, v)
     
