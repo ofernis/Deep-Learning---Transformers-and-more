@@ -440,25 +440,25 @@ class FineTuningTrainer(Trainer):
         #  fill out the training loop.
         # ====== YOUR CODE: ======
 
-        #  - Forward pass
-        output = self.model(input_ids, attention_masks, labels=labels)
+        # Forward pass
+        output = self.model(input_ids, attention_masks, labels=labels.unsqueeze(0))
         logits = output.logits
         
-        #  - Backward pass
+        # Backward pass
         self.optimizer.zero_grad()
         loss = output.loss
         loss.backward()
         
-        #  - Calculate number of correct char predictions
+        # Calculate number of correct char predictions
         y_pred = torch.argmax(logits, dim=-1)
         num_correct = torch.sum(y_pred == labels).float()
         
-        #  - Update params
+        # Update params
         self.optimizer.step()
         
         # ========================
         
-        return BatchResult(loss, num_correct)
+        return BatchResult(loss.item(), num_correct.item())
         
     def test_batch(self, batch) -> BatchResult:
         
@@ -482,4 +482,4 @@ class FineTuningTrainer(Trainer):
             num_correct = torch.sum(y_pred == labels)
             
             # ========================
-        return BatchResult(loss, num_correct)
+        return BatchResult(loss.item(), num_correct.item())
