@@ -31,6 +31,7 @@ def sliding_window_attention(q, k, v, window_size, padding_mask=None):
     #    (both for tokens that aren't in the window, and for tokens that correspond to padding according to the 'padding mask').
     # Aside from these two rules, you are free to implement the function as you wish. 
     # ====== YOUR CODE: ======
+    
     no_heads_flag = False
     
     if len(q.size()) == 3:
@@ -41,10 +42,12 @@ def sliding_window_attention(q, k, v, window_size, padding_mask=None):
     num_heads = q.shape[1]
     
     if padding_mask is not None:
+        padding_mask = padding_mask.bool()
         q = q.masked_fill(padding_mask.unsqueeze(1).unsqueeze(3).expand_as(q), 0)
         k = k.masked_fill(padding_mask.unsqueeze(1).unsqueeze(3).expand_as(k), 0)
         v = v.masked_fill(padding_mask.unsqueeze(1).unsqueeze(3).expand_as(v), 0)
     
+    # merge batch_size and num_heads for calculation purposes
     q = q.reshape(batch_size * num_heads, seq_len, embed_dim) # Batch*num_heads, SeqLen, Dims
     k = k.reshape(batch_size * num_heads, seq_len, embed_dim).transpose(1, 2) # Batch*num_heads, Dims, SeqLen
 
@@ -65,29 +68,30 @@ def sliding_window_attention(q, k, v, window_size, padding_mask=None):
     attn_rows = torch.matmul(q.unsqueeze(2), new_tensor).squeeze(2)
 
     # Calculate the size of the new matrix
-    rows, cols = seq_len, window_size + 1
-    new_cols = cols + rows - 1
+    rows, cols = seq_len, seq_len + (2 * padding)
     
     # Create an index tensor for selecting elements from the input matrix
-    index_tensor = torch.arange(new_cols).unsqueeze(0) - torch.arange(rows).unsqueeze(1)
+    index_tensor = torch.arange(cols).unsqueeze(0) - torch.arange(rows).unsqueeze(1)
 
     # Mask out the elements outside the range of the input matrix
-    mask = (index_tensor >= 0) & (index_tensor < cols)
-    mask = mask.repeat(batch_size*num_heads,1).reshape(batch_size*num_heads, seq_len, -1)
+    diagonal_indices = (index_tensor >= 0) & (index_tensor < window_size + 1)
+    diagonal_indices = diagonal_indices.repeat(batch_size*num_heads, 1).reshape(batch_size*num_heads, seq_len, -1)
 
     # Select elements from the input matrix using the index tensor and mask
-    attention = torch.full(size=(batch_size * num_heads, rows, new_cols), fill_value=-1e9) # Batch*num_heads, SeqLen, SeqLen
+    attention = torch.full(size=(batch_size * num_heads, rows, cols), fill_value=-9e15) # Batch*num_heads, SeqLen, SeqLen
 
     # Insert calculated rows into correct indices
-    attention[mask] = attn_rows.flatten()
+    attention[diagonal_indices] = attn_rows.flatten()
     
-    # Remove paddings
+    # Remove paddings created for the sliding window
     attention = attention[:, :, padding:-padding]
     
     attention /= math.sqrt(embed_dim)
     
+    # split batch_size and num_heads
     attention = attention.reshape(batch_size, num_heads, seq_len, seq_len) # Batch, num_heads, SeqLen, SeqLen
     
+    # remove num_heads dim if input didn't have it
     if no_heads_flag:
         attention = attention.squeeze(1)
     
@@ -222,6 +226,7 @@ class EncoderLayer(nn.Module):
         #   3) Apply a feed-forward layer to the output of step 2, and then apply dropout again.
         #   4) Add a second residual connection and normalize again.
         # ====== YOUR CODE: ======
+        
         attn_outputs = self.self_attn(x, padding_mask) # Apply attention to the input x
         attn_outputs = self.dropout(attn_outputs) # apply dropout
         
@@ -309,7 +314,7 @@ class Encoder(nn.Module):
         
         return output
     
-    def predict(self, sentence, padding_mask):
+    def predict(self, sentence, padding_mask, return_logits=False):
         '''
         :param sententence #[Batch, max_seq_len]
         :param padding mask #[Batch, max_seq_len]
@@ -317,6 +322,8 @@ class Encoder(nn.Module):
         '''
         logits = self.forward(sentence, padding_mask)
         preds = torch.round(torch.sigmoid(logits))
+        if return_logits:
+            return preds, logits
         return preds
 
     

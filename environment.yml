@@ -5,7 +5,7 @@ channels:
   - defaults
 dependencies:
   # common
-  - ffmpeg==4.2.2 # needed for gym video output
+  # - ffmpeg==4.2.2 # needed for gym video output
   - ipython
   - jupyter
   - jupyterlab

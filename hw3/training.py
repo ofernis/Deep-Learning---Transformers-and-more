@@ -384,14 +384,14 @@ class TransformerEncoderTrainer(Trainer):
         
         self.model.train()
         
+        # Forward pass
+        y_pred, logits = self.model.predict(input_ids, attention_mask, return_logits=True)
+        
+        loss = self.loss_fn(logits, label)
+        
+        # Backward pass
         self.optimizer.zero_grad()
         
-        #  - Forward pass
-        y_pred = self.model.predict(input_ids, attention_mask)
-        
-        loss = self.loss_fn(y_pred, label)
-        
-        #  - Backward pass
         loss.backward()
         
         self.optimizer.step()
@@ -418,16 +418,14 @@ class TransformerEncoderTrainer(Trainer):
             
             self.model.eval()
             
-            y_pred = self.model.predict(input_ids, attention_mask)
-            
-            loss = self.loss_fn(y_pred, label)
+            y_pred, logits = self.model.predict(input_ids, attention_mask, return_logits=True)
+        
+            loss = self.loss_fn(logits, label)
             
             num_correct = torch.sum(label == y_pred)
             
             # ========================
 
-            
-        
         return BatchResult(loss.item(), num_correct.item())
 
 

@@ -169,19 +169,19 @@ def part3_transformer_encoder_hyperparams():
         hidden_dim = 0,
         window_size = 0,
         droupout = 0.0,
-        lr=0.0,
+        lr = 0.0,
     )
 
     # TODO: Tweak the hyperparameters to train the transformer encoder.
     # ====== YOUR CODE: ======
     
-    hypers['embed_dim'] = 1024
-    hypers['num_heads'] = 16
+    hypers['embed_dim'] = 256
+    hypers['num_heads'] = 4
     hypers['num_layers'] = 3
-    hypers['hidden_dim'] = 256
-    hypers['window_size'] = 4
-    hypers['droupout'] = 0.1
-    hypers['lr'] = 1e-3
+    hypers['hidden_dim'] = 64
+    hypers['window_size'] = 16
+    hypers['droupout'] = 0.0
+    hypers['lr'] = 1e-4
     
     # ========================
     return hypers
@@ -191,12 +191,21 @@ def part3_transformer_encoder_hyperparams():
 
 part3_q1 = r"""
 **Your answer:**
-
+Similar to how the respective field works in CNNs, stacking encoder layers on top of eachother creates an "attention field-of-view" effect.
+On the lowest level, each value in the output is affected by keys in the window around the respective query.
+On the second level, the input is the output of the previous layer, thus already affected by the previous window, and now the window gets wider by 2 elements (the outliers of the window)
+Thus, on the last layer, the effective window size is $window\_size + 2 \cdot \# layers$.
 """
 
 part3_q2 = r"""
 **Your answer:**
 
+We propose a variation described in the paper.
+The proposition is called "Global Attention".
+the idea is to combine the regular sliding window with some constant "global keys" - a few pre-selected (and task-specific) input locations.
+We make this attention operation symmetric - a token with a global attention attends to all tokens across the sequence, and all tokens in the sequence attend to it.
+These input locations are task-specific, for example - for classification, the global attention is used on the [CLS] location.
+Since the number of such tokens is small relative to $n$ the complexity of the combined local and global attention is still $\mathcal{O}(wn)$.
 
 """
 
