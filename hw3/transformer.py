@@ -42,7 +42,6 @@ def sliding_window_attention(q, k, v, window_size, padding_mask=None):
     num_heads = q.shape[1]
     
     if padding_mask is not None:
-        padding_mask = padding_mask.bool()
         q = q.masked_fill(padding_mask.unsqueeze(1).unsqueeze(3).expand_as(q), 0)
         k = k.masked_fill(padding_mask.unsqueeze(1).unsqueeze(3).expand_as(k), 0)
         v = v.masked_fill(padding_mask.unsqueeze(1).unsqueeze(3).expand_as(v), 0)
@@ -308,7 +307,7 @@ class Encoder(nn.Module):
         
         #  5) Apply the classification MLP to the output vector corresponding to the special token [CLS] 
         #     (always the first token) to receive the logits.
-        output = self.classification_mlp(layers_output[:, 0]).squeeze(1)
+        output = self.classification_mlp(layers_output[:, 0]).flatten()
         
         # ========================
         

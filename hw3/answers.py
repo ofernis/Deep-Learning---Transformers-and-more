@@ -177,10 +177,10 @@ def part3_transformer_encoder_hyperparams():
     
     hypers['embed_dim'] = 256
     hypers['num_heads'] = 4
-    hypers['num_layers'] = 3
+    hypers['num_layers'] = 6
     hypers['hidden_dim'] = 64
     hypers['window_size'] = 16
-    hypers['droupout'] = 0.0
+    hypers['droupout'] = 0.1
     hypers['lr'] = 1e-4
     
     # ========================
