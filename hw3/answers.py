@@ -57,7 +57,7 @@ Also, by training on sequences (they way we ordered them), makes the model to ca
 part1_q2 = r"""
 **Your answer:**
 
-We initially ordered the data such that following batches will be matched by each sentence (sentence $i$ in batch $j$ will be followed by sentence $i+1$ in batch $j$)
+We initially ordered the data such that following batches will be matched by each sentence (sentence $i$ in batch $j$ will be followed by sentence $i$ in batch $j+1$)
 So, during training, the model's "memory" doesn't change between batches, and keeps working on the following sentence.
 
 """
@@ -140,8 +140,8 @@ By that, we can seperate both parts of the VAE and generate new images with the 
 part2_q3 = r"""
 **Your answer:**
 
-
-
+By maximizing the evidence distribution $p(\bb{X})$, the VAE learns to capture the underlying structure of the data and generate meaningful samples from the learned latent space.
+This approach allows the VAE to generate new samples by sampling from the latent space distribution and passing them through the decoder.
 """
 
 part2_q4 = r"""
@@ -149,8 +149,6 @@ part2_q4 = r"""
 
 We use the log variance for numerical stability.
 $\sigma$ can be very low and might cause numerical issues, using the log-space helps reduce these issues.
-
-
 """
 
 # ==============
@@ -191,7 +189,7 @@ def part3_transformer_encoder_hyperparams():
 
 part3_q1 = r"""
 **Your answer:**
-Similar to how the respective field works in CNNs, stacking encoder layers on top of eachother creates an "attention field-of-view" effect.
+Similar to how the respective field works in CNNs, stacking encoder layers on top of each other creates an "attention field-of-view" effect.
 On the lowest level, each value in the output is affected by keys in the window around the respective query.
 On the second level, the input is the output of the previous layer, thus already affected by the previous window, and now the window gets wider by 2 elements (the outliers of the window)
 Thus, on the last layer, the effective window size is $window\_size + 2 \cdot \# layers$.
@@ -213,13 +211,18 @@ Since the number of such tokens is small relative to $n$ the complexity of the c
 part4_q1 = r"""
 **Your answer:**
 
-
+The obtained results demonstrate a fairly good performance (around 80%), which in comparison to the results of the previous part - are significantly better.
+We believe that this performance difference stems from the fact that the fine-tuned model was originally train on a much larger dataset, and also its fundamental
+architecture is different in aspects of task compatibility. This might not always be the case on any downstream task, where if the fine-tuned model was originally trained on
+a relatively small dataset which doesn't represent the data's underlying distribution, or if its architecture was not suitable for a given task - the results we get would be worse 
+than those of a "trained from scratch" encoder.    
 """
 
 part4_q2 = r"""
 **Your answer:**
 
-
+In this case the model's results would be worse, since un-freezing and modifying internal model layers (such as the attention blocks) could potentially disrupt the model's ability to capture contextual
+information effectively - leading to less accurate results. The last two linear layers, on the other hand, typically contain task-specific information and fine-tuning only them allows the model to adapt to the target task more accurately.
 """
 
 
