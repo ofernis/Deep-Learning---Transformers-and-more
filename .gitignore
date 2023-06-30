@@ -1,2 +1,4 @@
 hw3/__pycache__/
 cs236781/__pycache__/
+finetuned_all.pt
+finetuned_last_2.pt
