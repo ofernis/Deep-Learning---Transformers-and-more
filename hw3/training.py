@@ -434,14 +434,14 @@ class FineTuningTrainer(Trainer):
     def train_batch(self, batch) -> BatchResult:
         
         input_ids = batch["input_ids"].to(self.device)
-        attention_masks = batch["attention_mask"]
-        labels= batch["label"]
+        attention_masks = batch["attention_mask"].to(self.device)
+        labels= batch["label"].to(self.device)
         # TODO:
         #  fill out the training loop.
         # ====== YOUR CODE: ======
 
         # Forward pass
-        output = self.model(input_ids, attention_masks, labels=labels.unsqueeze(0))
+        output = self.model(input_ids, attention_masks, labels=labels)
         logits = output.logits
         
         # Backward pass
@@ -463,8 +463,8 @@ class FineTuningTrainer(Trainer):
     def test_batch(self, batch) -> BatchResult:
         
         input_ids = batch["input_ids"].to(self.device)
-        attention_masks = batch["attention_mask"]
-        labels= batch["label"]
+        attention_masks = batch["attention_mask"].to(self.device)
+        labels= batch["label"].to(self.device)
         
         with torch.no_grad():
             # TODO:
