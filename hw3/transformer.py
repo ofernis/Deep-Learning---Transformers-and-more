@@ -31,7 +31,7 @@ def sliding_window_attention(q, k, v, window_size, padding_mask=None):
     #    (both for tokens that aren't in the window, and for tokens that correspond to padding according to the 'padding mask').
     # Aside from these two rules, you are free to implement the function as you wish. 
     # ====== YOUR CODE: ======
-    
+    device = q.device
     no_heads_flag = False
     
     if len(q.size()) == 3:
@@ -42,6 +42,7 @@ def sliding_window_attention(q, k, v, window_size, padding_mask=None):
     num_heads = q.shape[1]
     
     if padding_mask is not None:
+        padding_mask = padding_mask.bool()
         q = q.masked_fill(padding_mask.unsqueeze(1).unsqueeze(3).expand_as(q), 0)
         k = k.masked_fill(padding_mask.unsqueeze(1).unsqueeze(3).expand_as(k), 0)
         v = v.masked_fill(padding_mask.unsqueeze(1).unsqueeze(3).expand_as(v), 0)
@@ -77,7 +78,7 @@ def sliding_window_attention(q, k, v, window_size, padding_mask=None):
     diagonal_indices = diagonal_indices.repeat(batch_size*num_heads, 1).reshape(batch_size*num_heads, seq_len, -1)
 
     # Select elements from the input matrix using the index tensor and mask
-    attention = torch.full(size=(batch_size * num_heads, rows, cols), fill_value=-9e15) # Batch*num_heads, SeqLen, SeqLen
+    attention = torch.full(size=(batch_size * num_heads, rows, cols), fill_value=-9e15, device=device) # Batch*num_heads, SeqLen, SeqLen
 
     # Insert calculated rows into correct indices
     attention[diagonal_indices] = attn_rows.flatten()
