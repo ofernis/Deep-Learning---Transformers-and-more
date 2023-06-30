@@ -439,7 +439,7 @@ class FineTuningTrainer(Trainer):
         # TODO:
         #  fill out the training loop.
         # ====== YOUR CODE: ======
-
+        self.model.train()
         # Forward pass
         output = self.model(input_ids, attention_masks, labels=labels)
         logits = output.logits
@@ -470,6 +470,7 @@ class FineTuningTrainer(Trainer):
             # TODO:
             #  fill out the training loop.
             # ====== YOUR CODE: ======
+            self.model.eval()
 
             output = self.model(input_ids, attention_masks, labels=labels)
             
